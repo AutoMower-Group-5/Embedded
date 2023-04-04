@@ -1,5 +1,9 @@
 #include <MeAuriga.h>
 #include <SoftwareSerial.h>
+#include <Wire.h>
+
+
+MeGyro gyro(0, 0x69);
 
 unsigned char table[128] = { 0 };
 SoftwareSerial softuart(13, 12);
@@ -57,18 +61,33 @@ void ChangeSpeed(int16_t spd) {
   moveSpeed = spd;
 }
 
-void Rotate(int16_t deg, int clockwise) {
+void Rotate(float d_deg, int clockwise) {
   ChangeSpeed(100);
-  for (int i = 0; i < deg; i++) {
-    TurnRight1();
+
+  gyro.begin();
+  gyro.update();
+  float start_deg = gyro.getAngleZ();
+  float deg = start_deg;
+
+  while ((deg - start_deg) < d_deg) {
+    gyro.update();
+    deg = gyro.getAngleZ();
+
+    Serial.print(deg);
+    Serial.print('\t');
+    Serial.print(deg - start_deg);
+    Serial.print(" < ");
+    Serial.println(d_deg);
     delay(10);
   }
+  Serial.println("Done!");
 }
 
 
 
 
 void setup() {
+  gyro.begin();
   Serial.begin(115200);
 
   //Set PWM 8KHz
@@ -122,7 +141,8 @@ void loop() {
     case Auto:
       {
 
-        enum state_AutoMower { Locate_Path,
+        enum state_AutoMower { Idle,
+                               Locate_Path,
                                Forward_Fast,
                                Forward_Approach,
                                Colission
@@ -134,9 +154,16 @@ void loop() {
 
         switch (state) {
 
+          case Idle:
+            {
+              break;
+            }
+
           case Locate_Path:
             {
-              Rotate(90, 0);
+              Rotate(90.0, 0);
+              state = Idle;
+              break;
             }
 
           default:
