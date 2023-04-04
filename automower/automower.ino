@@ -62,25 +62,29 @@ void ChangeSpeed(int16_t spd) {
 }
 
 void Rotate(float d_deg, int clockwise) {
-  ChangeSpeed(100);
+  ChangeSpeed(150);
 
   gyro.begin();
   gyro.update();
   float start_deg = gyro.getAngleZ();
   float deg = start_deg;
+  if (clockwise) {
+    while ((deg - start_deg) < d_deg) {
+      TurnRight1();
 
-  while ((deg - start_deg) < d_deg) {
-    gyro.update();
-    deg = gyro.getAngleZ();
-
-    Serial.print(deg);
-    Serial.print('\t');
-    Serial.print(deg - start_deg);
-    Serial.print(" < ");
-    Serial.println(d_deg);
-    delay(10);
+      gyro.update();
+      deg = gyro.getAngleZ();
+    }
   }
-  Serial.println("Done!");
+
+  else {
+    while ((start_deg - deg) < d_deg) {
+      TurnLeft1();
+      gyro.update();
+      deg = gyro.getAngleZ();
+    }
+  }
+  Stop();
 }
 
 
@@ -162,7 +166,7 @@ void loop() {
           case Locate_Path:
             {
               Rotate(90.0, 0);
-              state = Idle;
+              Rotate(90.0, 1);
               break;
             }
 
