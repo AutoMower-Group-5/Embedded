@@ -15,6 +15,16 @@ MeEncoderOnBoard Encoder_2(SLOT2);
 int16_t moveSpeed = 200;
 
 
+#define AURIGARINGLEDNUM 12
+#define RINGALLLEDS 0
+
+
+#ifdef MeAuriga_H
+// on-board LED ring, at PORT0 (onboard), with 12 LEDs
+MeRGBLed led_ring(0, 12);
+#endif
+
+
 void SetMotors(float motor1Percent, float motor2Percent) {
   Encoder_1.setMotorPwm((motor1Percent / 100.0) * moveSpeed);
   Encoder_2.setMotorPwm((motor2Percent / 100.0) * moveSpeed);
@@ -61,30 +71,22 @@ void ChangeSpeed(int16_t spd) {
   moveSpeed = spd;
 }
 
-void Rotate(float d_deg, int clockwise) {
-  ChangeSpeed(150);
-
+void Rotate(int16_t deg_d) {
   gyro.begin();
   gyro.update();
   float start_deg = gyro.getAngleZ();
   float deg = start_deg;
-  if (clockwise) {
-    while ((deg - start_deg) < d_deg) {
-      TurnRight1();
-
-      gyro.update();
-      deg = gyro.getAngleZ();
-    }
+  while ((deg - start_deg) < deg_d) {
+    TurnRight1();
+    gyro.update();
+    deg = gyro.getAngleZ();
   }
+}
 
-  else {
-    while ((start_deg - deg) < d_deg) {
-      TurnLeft1();
-      gyro.update();
-      deg = gyro.getAngleZ();
-    }
-  }
-  Stop();
+
+void SetLedRing(int r, int g, int b) {
+  led_ring.setColor(RINGALLLEDS, r, g, b);
+  led_ring.show();
 }
 
 
@@ -99,11 +101,100 @@ void setup() {
   TCCR1B = _BV(CS11) | _BV(WGM12);
   TCCR2A = _BV(WGM21) | _BV(WGM20);
   TCCR2B = _BV(CS21);
+
+#ifdef MeAuriga_H
+  // 12 LED Ring controller is on Auriga D44/PWM
+  led_ring.setpin(44);
+#endif
 }
 
 enum Mode { Manual,
             Auto };
 enum Mode MODE = Auto;
+
+enum state_AutoMower { Idle,
+                       Locate_Path,
+                       Forward_Fast,
+                       Forward_Approach,
+                       Colission,
+                       Back
+};
+
+enum state_AutoMower state = Locate_Path;
+
+
+
+
+float distance_cm = 400.0;
+float deg;
+float start_deg = NULL;
+int16_t ROTATE_STEP_DEG = 15;
+
+int16_t SPEED_HIGH = 255;
+int16_t SPEED_MEDIUM = 150;
+int16_t SPEED_SLOW = 100;
+
+//Distance in cm
+int16_t DISTANCE_LONG = 50;
+int16_t DISTANCE_MEDIUM = 30;
+int16_t DISTANCE_SHORT = 15;
+int16_t DISTANCE_COLISSION = 5;
+
+int16_t LED_BRIGHTNESS = 10;
+
+
+
+void ChangeMowerState(int new_state) {
+  state = new_state;
+
+  switch (new_state) {
+    default:
+      {
+        ChangeMowerState(Idle);
+        break;
+      }
+    case Idle:
+      {
+        SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS, LED_BRIGHTNESS);
+        break;
+      }
+    case Locate_Path:
+      {
+        Stop();
+        gyro.begin();
+        ChangeSpeed(SPEED_MEDIUM);
+        SetLedRing(LED_BRIGHTNESS, 0, 0);
+        break;
+      }
+    case Forward_Fast:
+      {
+        ChangeSpeed(SPEED_HIGH);
+        SetLedRing(0, LED_BRIGHTNESS, 0);
+        break;
+      }
+    case Forward_Approach:
+      {
+        ChangeSpeed(SPEED_MEDIUM);
+        SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS, 0);
+        break;
+      }
+    case Colission:
+      {
+        Stop();
+        SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS / 2, 0);
+        break;
+      }
+    case Back:
+      {
+        ChangeSpeed(SPEED_MEDIUM);
+        SetLedRing(LED_BRIGHTNESS, 0, LED_BRIGHTNESS);
+        break;
+      }
+  }
+}
+
+
+
 
 void loop() {
 
@@ -145,37 +236,85 @@ void loop() {
     case Auto:
       {
 
-        enum state_AutoMower { Idle,
-                               Locate_Path,
-                               Forward_Fast,
-                               Forward_Approach,
-                               Colission
-        };
+        distance_cm = ultraSensor.distanceCm();
 
-        enum state_AutoMower state = Locate_Path;
-        int distance_cm = ultraSensor.distanceCm();
-        ChangeSpeed(255);
+        Serial.print("Distance: ");
+        Serial.print(distance_cm);
+        Serial.print("\tDegree: ");
+        Serial.print(deg);
+        Serial.print(" start_deg: ");
+        Serial.print(start_deg);
+        Serial.print("\tState: ");
+        Serial.println(state);
+        delay(100);
 
         switch (state) {
-
+          default:
+            {
+            }
           case Idle:
             {
+              ChangeMowerState(Locate_Path);
               break;
             }
 
           case Locate_Path:
             {
-              Rotate(90.0, 0);
-              Rotate(90.0, 1);
+              if ((deg - start_deg) <= ROTATE_STEP_DEG) {
+                TurnRight1();
+                gyro.update();
+                deg = gyro.getAngleZ();
+
+
+              } else if ((distance_cm <= DISTANCE_MEDIUM) || (distance_cm >= 400.0)) {
+                start_deg = gyro.getAngleZ();
+                deg = start_deg;
+              } else {
+                Stop();
+                ChangeMowerState(Forward_Fast);
+              }
+
+              break;
+            }
+          case Forward_Fast:
+            {
+              if (distance_cm < DISTANCE_LONG) {
+                ChangeMowerState(Forward_Approach);
+              }
+              Forward();
               break;
             }
 
-          default:
-            state = Locate_Path;
-            break;
+          case Forward_Approach:
+            {
+              if (distance_cm >= DISTANCE_LONG) {
+
+                ChangeMowerState(Forward_Fast);
+
+              } else if (distance_cm > DISTANCE_MEDIUM) {
+                ChangeSpeed(SPEED_MEDIUM);
+              } else if (distance_cm > DISTANCE_SHORT) {
+                ChangeSpeed(SPEED_SLOW);
+              } else if (distance_cm <= DISTANCE_COLISSION) {
+                ChangeMowerState(Colission);
+              }
+              Forward();
+              break;
+            }
+
+          case Colission:
+            {
+              ChangeMowerState(Back);
+            }
+          case Back:
+            {
+              if (distance_cm >= DISTANCE_SHORT) {
+                ChangeMowerState(Locate_Path);
+              }
+              Backward();
+              break;
+            }
         }
       }
-    default:
-      break;
   }
 }
