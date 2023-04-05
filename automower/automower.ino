@@ -89,6 +89,17 @@ void SetLedRing(int r, int g, int b) {
   led_ring.show();
 }
 
+float GetZAngle(){
+  gyro.fast_update();
+  float deg = gyro.getAngleZ();
+  return deg + 180;
+}
+
+float AbsoluteAngle(float a1, float a2){
+    int aRes = (int)a1-(int)a2;
+    aRes = aRes % 360;
+    return (float)aRes;
+}
 
 
 
@@ -161,7 +172,7 @@ void ChangeMowerState(int new_state) {
     case Locate_Path:
       {
         Stop();
-        gyro.begin();
+        start_deg = deg;
         ChangeSpeed(SPEED_MEDIUM);
         SetLedRing(LED_BRIGHTNESS, 0, 0);
         break;
@@ -237,6 +248,7 @@ void loop() {
       {
 
         distance_cm = ultraSensor.distanceCm();
+        deg = GetZAngle();
 
         Serial.print("Distance: ");
         Serial.print(distance_cm);
@@ -244,6 +256,8 @@ void loop() {
         Serial.print(deg);
         Serial.print(" start_deg: ");
         Serial.print(start_deg);
+        Serial.print("\tAbsolute angle: ");
+        Serial.print(AbsoluteAngle(deg, start_deg));
         Serial.print("\tState: ");
         Serial.println(state);
         delay(100);
@@ -260,15 +274,12 @@ void loop() {
 
           case Locate_Path:
             {
-              if ((deg - start_deg) <= ROTATE_STEP_DEG) {
+              if (AbsoluteAngle(deg, start_deg) <= ROTATE_STEP_DEG) {
                 TurnRight1();
-                gyro.update();
-                deg = gyro.getAngleZ();
 
 
               } else if ((distance_cm <= DISTANCE_MEDIUM) || (distance_cm >= 400.0)) {
-                start_deg = gyro.getAngleZ();
-                deg = start_deg;
+                start_deg = deg;
               } else {
                 Stop();
                 ChangeMowerState(Forward_Fast);
@@ -295,7 +306,7 @@ void loop() {
                 ChangeSpeed(SPEED_MEDIUM);
               } else if (distance_cm > DISTANCE_SHORT) {
                 ChangeSpeed(SPEED_SLOW);
-              } else if (distance_cm <= DISTANCE_COLISSION) {
+              } else if (distance_cm <= DISTANCE_COLISSION || (distance_cm >= 400.0)) {
                 ChangeMowerState(Colission);
               }
               Forward();
