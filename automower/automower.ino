@@ -8,6 +8,7 @@ MeGyro gyro(0, 0x69);
 unsigned char table[128] = { 0 };
 SoftwareSerial softuart(13, 12);
 MeSerial mySerial(PORT_8);
+
 MeUltrasonicSensor ultraSensor(PORT_7); /* Ultrasonic module can ONLY be connected to port 3, 4, 6, 7, 8 of base shield. */
 
 MeEncoderOnBoard Encoder_1(SLOT1);
@@ -84,6 +85,9 @@ void Rotate(int16_t deg_d) {
 }
 
 
+
+
+
 void SetLedRing(int r, int g, int b) {
   led_ring.setColor(RINGALLLEDS, r, g, b);
   led_ring.show();
@@ -97,21 +101,54 @@ int GetZAngle() {
 
 
 
-void setup() {
-  gyro.begin();
-  Serial.begin(115200);
+char* substring(char* destination, const char* source, int beg, int n) {
+  while (n > 0) {
+    *destination = *(source + beg);
 
-  //Set PWM 8KHz
-  TCCR1A = _BV(WGM10);
-  TCCR1B = _BV(CS11) | _BV(WGM12);
-  TCCR2A = _BV(WGM21) | _BV(WGM20);
-  TCCR2B = _BV(CS21);
+    destination++;
+    source++;
+    n--;
+  }
 
-#ifdef MeAuriga_H
-  // 12 LED Ring controller is on Auriga D44/PWM
-  led_ring.setpin(44);
-#endif
+  *destination = '\0';
+
+  return destination;
 }
+
+
+void handleSerialInput(char* inputStr) {
+  const int len = strlen(inputStr);
+  if (len >= 2) {
+    Serial.print("Input: ");
+    Serial.println(inputStr);
+    delay(10);
+
+    if (inputStr[0] == 'L' && inputStr[1] == ':') {
+      Serial.print("Lidar message detected\n");
+      delay(10);
+    }
+  }
+
+  char lidar_msg[32];
+  int substr_depth = 3;
+  substring(lidar_msg, inputStr, 2, substr_depth);  
+
+
+  if(!strcmp(lidar_msg, "DET")){
+    Serial.println("Stop");
+  } 
+  else if(!strcmp(lidar_msg, "RHT") || !strcmp(lidar_msg, "LHT")){
+    Serial.print("Adjust ");
+    Serial.print(lidar_msg[0]);
+  } 
+  else if(!strcmp(lidar_msg, "DON")){ 
+    Serial.println("Rotate");
+  } 
+  
+}
+
+
+
 
 enum Mode { Manual,
             Auto };
@@ -126,9 +163,6 @@ enum state_AutoMower { Idle,
 };
 
 enum state_AutoMower state = Locate_Path;
-
-
-
 
 float distance_cm = 400.0;
 int deg = -200;
@@ -150,6 +184,7 @@ int16_t LED_BRIGHTNESS = 10;
 
 int LOOP_PERIOD_MS = 100;
 int DEBUG = 0;
+
 
 void ChangeMowerState(int new_state) {
   state = new_state;
@@ -200,12 +235,41 @@ void ChangeMowerState(int new_state) {
   }
 }
 
+void setup() {
+  gyro.begin();
+  Serial.begin(115200);
+
+  //Set PWM 8KHz
+  TCCR1A = _BV(WGM10);
+  TCCR1B = _BV(CS11) | _BV(WGM12);
+  TCCR2A = _BV(WGM21) | _BV(WGM20);
+  TCCR2B = _BV(CS21);
+
+#ifdef MeAuriga_H
+  // 12 LED Ring controller is on Auriga D44/PWM
+  led_ring.setpin(44);
+#endif
+}
 
 
 
 void loop() {
-
   delay(LOOP_PERIOD_MS);
+
+  char str_serial[32];
+  int i = 0;
+  while(Serial.available()){
+    char c = Serial.read();
+    if(c != '\n'){
+      str_serial[i] = c;
+      i++;
+    }
+  }
+  if(i>0){
+    str_serial[i] = '\0';
+    handleSerialInput(str_serial);
+  }
+
   switch (MODE) {
     case Manual:
       {
