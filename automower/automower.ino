@@ -89,16 +89,10 @@ void SetLedRing(int r, int g, int b) {
   led_ring.show();
 }
 
-float GetZAngle(){
+int GetZAngle() {
   gyro.fast_update();
-  float deg = gyro.getAngleZ();
-  return deg + 180;
-}
-
-float AbsoluteAngle(float a1, float a2){
-    int aRes = (int)a1-(int)a2;
-    aRes = aRes % 360;
-    return (float)aRes;
+  int deg = (int)gyro.getAngleZ();
+  return deg;
 }
 
 
@@ -137,9 +131,10 @@ enum state_AutoMower state = Locate_Path;
 
 
 float distance_cm = 400.0;
-float deg;
-float start_deg = NULL;
-int16_t ROTATE_STEP_DEG = 15;
+int deg = -200;
+int start_deg = -200;
+int to_deg = -200;
+int16_t ROTATE_STEP_DEG = 37;
 
 int16_t SPEED_HIGH = 255;
 int16_t SPEED_MEDIUM = 150;
@@ -153,7 +148,8 @@ int16_t DISTANCE_COLISSION = 5;
 
 int16_t LED_BRIGHTNESS = 10;
 
-
+int LOOP_PERIOD_MS = 100;
+int DEBUG = 0;
 
 void ChangeMowerState(int new_state) {
   state = new_state;
@@ -209,58 +205,30 @@ void ChangeMowerState(int new_state) {
 
 void loop() {
 
+  delay(LOOP_PERIOD_MS);
   switch (MODE) {
     case Manual:
       {
-
-        if (Serial.available()) {
-          char rec_str = Serial.read();
-          switch (rec_str) {
-            case 'w':
-              {
-                Forward();
-                break;
-              }
-            case 's':
-              {
-                Backward();
-                break;
-              }
-            case 'a':
-              {
-                TurnLeft();
-                break;
-              }
-            case 'd':
-              {
-                TurnRight();
-                break;
-              }
-            case 'q':
-              {
-                Stop();
-                break;
-              }
-          }
-        }
+        break;
       }
     case Auto:
       {
 
         distance_cm = ultraSensor.distanceCm();
         deg = GetZAngle();
-
-        Serial.print("Distance: ");
-        Serial.print(distance_cm);
-        Serial.print("\tDegree: ");
-        Serial.print(deg);
-        Serial.print(" start_deg: ");
-        Serial.print(start_deg);
-        Serial.print("\tAbsolute angle: ");
-        Serial.print(AbsoluteAngle(deg, start_deg));
-        Serial.print("\tState: ");
-        Serial.println(state);
-        delay(100);
+        if(DEBUG){
+          Serial.print("Distance: ");
+          Serial.print(distance_cm);
+          Serial.print("\tDegree: ");
+          Serial.print(deg);
+          Serial.print(" start_deg: ");
+          Serial.print(start_deg);
+          Serial.print(" to_deg: ");
+          Serial.print(to_deg);
+          Serial.print("\tState: ");
+          Serial.println(state);
+        }
+        
 
         switch (state) {
           default:
@@ -274,14 +242,18 @@ void loop() {
 
           case Locate_Path:
             {
-              if (AbsoluteAngle(deg, start_deg) <= ROTATE_STEP_DEG) {
+              if ((to_deg != -200) && (deg < to_deg)) {
                 TurnRight1();
 
-
               } else if ((distance_cm <= DISTANCE_MEDIUM) || (distance_cm >= 400.0)) {
-                start_deg = deg;
+                Stop();
+                gyro.begin();
+                start_deg = GetZAngle();
+                to_deg = (start_deg + ROTATE_STEP_DEG) % 360;
               } else {
                 Stop();
+                start_deg = -200;
+                to_deg = -200;
                 ChangeMowerState(Forward_Fast);
               }
 
@@ -326,6 +298,7 @@ void loop() {
               break;
             }
         }
+        break;
       }
   }
 }
