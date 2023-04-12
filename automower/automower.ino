@@ -143,84 +143,82 @@ char* substring(char* destination, const char* source, int beg, int n) {
 }
 
 
-void handleSerialInput(char* inputStr, char* action) {
+char* action;
+void handleSerialInput(char* inputStr) {
   const int len = strlen(inputStr);
 
-  if (inputStr[0] == 'L' && inputStr[1] == ':') { //Messages from LIDAR
+  if (inputStr[0] == 'L' && inputStr[1] == ':' && MODE == Auto) {  //Messages from LIDAR
     char lidar_msg[32];
     int substr_depth = 3;
     substring(lidar_msg, inputStr, 2, substr_depth);
 
 
-    if (!strcmp(lidar_msg, "DET")) { //Colission detected by lidar
+    if (!strcmp(lidar_msg, "DET")) {  //Colission detected by lidar
 
       ChangeMowerState(Colission);
       Serial.print("A:STOP");
 
-    } 
-    else if (!strcmp(lidar_msg, "RHT") || !strcmp(lidar_msg, "LHT")) { //Lidar requests rotation by some degrees
+    } else if (!strcmp(lidar_msg, "RHT") || !strcmp(lidar_msg, "LHT")) {  //Lidar requests rotation by some degrees
       action = lidar_msg;
-      
-
-    } 
-    else if (!strcmp(lidar_msg, "DON")) { //Lidar is done taking photo
-
+      char ch_angle[32];
+      substring(ch_angle, inputStr, 6, substr_depth);
+      Serial.println(ch_angle);
 
 
+    } else if (!strcmp(lidar_msg, "DON")) {  //Lidar is done taking photo
+      action = "Rotate";
     }
-  } 
-  
-  else if(inputStr[0] == 'M' && inputStr[1] == ':'){
-     switch(inputStr[2]){
-       case 'M':
-       {
-         if(MODE == Auto){
-          MODE = Manual;
+  }
 
-         }
-         break;
-       }
-       case 'A':
-       {
-         if(MODE == Manual){
+  else if (inputStr[0] == 'M' && inputStr[1] == ':') {
+    switch (inputStr[2]) {
+      case 'M':
+        {
+          if (MODE == Auto) {
+            MODE = Manual;
+          }
+          break;
+        }
+      case 'A':
+        {
+          if (MODE == Manual) {
             MODE = Auto;
             ChangeMowerState(Locate_Path);
+          }
+          break;
+        }
+    }
 
-         }
-         break;
-       }
-     }
-    
   }
-  
-  else if(inputStr[0] == 'D' && inputStr[1] == ':' && MODE == Manual){
-    
-    switch(inputStr[2]){
+
+  else if (inputStr[0] == 'D' && inputStr[1] == ':' && MODE == Manual) {
+
+    switch (inputStr[2]) {
       case 'W':
-      {
-        state_manual = Forwards;
-        break;
-      }
+        {
+          state_manual = Forwards;
+          break;
+        }
       case 'A':
-      {
-        state_manual = Left;
-        break;
-      }
+        {
+          state_manual = Left;
+          break;
+        }
       case 'S':
-      {
-        state_manual = Backwards;
-        break;
-      }
+        {
+          state_manual = Backwards;
+          break;
+        }
       case 'D':
-      {
-        state_manual = Right;
-        break;
-      }
+        {
+          state_manual = Right;
+          break;
+        }
       case 'Q':
-      {
-        state_manual = Stopped;
-        break;
-      }
+        {
+          state_manual = Stopped;
+          break;
+        }
     }
   }
 }
@@ -235,9 +233,9 @@ int to_deg = -200;
 int collision_rotate_deg = 0;
 int16_t ROTATE_STEP_DEG = 37;
 
-int16_t SPEED_HIGH = 255;
-int16_t SPEED_MEDIUM = 150;
-int16_t SPEED_SLOW = 100;
+int16_t SPEED_HIGH = 150;
+int16_t SPEED_MEDIUM = 100;
+int16_t SPEED_SLOW = 75;
 
 //Distance in cm
 int16_t DISTANCE_LONG = 50;
@@ -288,13 +286,13 @@ void ChangeMowerState(int new_state) {
     case Colission:
       {
         Stop();
-        SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS / 2, 0);
+        //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS / 2, 0);
         break;
       }
     case Back:
       {
         ChangeSpeed(SPEED_MEDIUM);
-        SetLedRing(LED_BRIGHTNESS, 0, LED_BRIGHTNESS);
+        //SetLedRing(LED_BRIGHTNESS, 0, LED_BRIGHTNESS);
         break;
       }
   }
@@ -320,10 +318,9 @@ void setup() {
 
 void loop() {
   delay(LOOP_PERIOD_MS);
+  int i = 0;
 
   char str_serial[32];
-  int i = 0;
-  char* action;
   while (Serial.available()) {
     char c = Serial.read();
     if (c != '\n') {
@@ -333,7 +330,7 @@ void loop() {
   }
   if (i > 0) {
     str_serial[i] = '\0';
-    handleSerialInput(str_serial, action);
+    handleSerialInput(str_serial);
   }
 
   switch (MODE) {
@@ -341,53 +338,52 @@ void loop() {
       {
         SetLedRing(0, 0, LED_BRIGHTNESS);
         ChangeSpeed(150);
-        if(DEBUG){
+        if (DEBUG) {
           Serial.print("State: ");
           Serial.println(state_manual);
-
         }
-        switch(state_manual){
+        switch (state_manual) {
           case Stopped:
-          {
-            Stop();
-            break;
-          }
+            {
+              Stop();
+              break;
+            }
           case Forwards:
-          {
-            Forward();
-            break;
-          }
+            {
+              Forward();
+              break;
+            }
           case Forwards_Left:
-          {
-            break;
-          }
+            {
+              break;
+            }
           case Forwards_Right:
-          {
-            break;
-          }
+            {
+              break;
+            }
           case Backwards:
-          {
-            Backward();
-            break;
-          }
+            {
+              Backward();
+              break;
+            }
           case Backwards_Left:
-          {
-            break;
-          }
+            {
+              break;
+            }
           case Backwards_Right:
-          {
-            break;
-          }
+            {
+              break;
+            }
           case Right:
-          {
-            TurnRight1();
-            break;
-          }
+            {
+              TurnRight1();
+              break;
+            }
           case Left:
-          {
-            TurnLeft1();
-            break;
-          }
+            {
+              TurnLeft1();
+              break;
+            }
         }
         break;
       }
@@ -397,7 +393,7 @@ void loop() {
         SetLedRing(0, LED_BRIGHTNESS, 0);
         distance_cm = ultraSensor.distanceCm();
         deg = GetZAngle();
-        if (DEBUG) {
+        if (0) {
           Serial.print("Distance: ");
           Serial.print(distance_cm);
           Serial.print("\tDegree: ");
@@ -468,7 +464,41 @@ void loop() {
 
           case Colission:
             {
-              ChangeMowerState(Back);
+              if(DEBUG){
+                Serial.print("Action: '");
+                Serial.print(action);
+                Serial.println("'");
+              }
+              if(action == "RHT"){
+                if(DEBUG){
+                  Serial.print("I will rotate ");
+                  Serial.print(action);
+                  Serial.print(" ");
+                  Serial.print(collision_rotate_deg);
+                  Serial.println(" degrees.");
+                }
+              }
+              else if(action == "LHT"){
+                if(DEBUG){
+                  Serial.print("I will rotate ");
+                  Serial.print(action);
+                  Serial.print(" ");
+                  Serial.print(collision_rotate_deg);
+                  Serial.println(" degrees.");
+                }
+              }
+              else if(action == "Rotate"){
+              if(DEBUG){
+                Serial.print("I will rotate away from object");
+              }
+                
+
+              }
+              else if(action == "Continue"){
+                action = "";
+                ChangeMowerState(Forward_Fast);
+              }
+              break;
             }
           case Back:
             {
