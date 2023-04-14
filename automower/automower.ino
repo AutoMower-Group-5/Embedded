@@ -99,15 +99,27 @@ void ChangeSpeed(int16_t spd) {
   moveSpeed = spd;
 }
 
-void Rotate(int16_t deg_d) {
+void Rotate(int16_t deg_d, char direction) {
   gyro.begin();
   gyro.update();
-  float start_deg = gyro.getAngleZ();
-  float deg = start_deg;
-  while ((deg - start_deg) < deg_d) {
-    TurnRight1();
-    gyro.update();
-    deg = gyro.getAngleZ();
+  int start_deg = (int)gyro.getAngleZ();
+  int deg = start_deg;
+
+  if (direction == 'R') {
+    int stop_deg = (start_deg + deg_d) % 360;
+    while (deg < stop_deg) {
+      TurnRight1();
+      gyro.update();
+      deg = gyro.getAngleZ();
+    }
+  }
+  else if (direction == 'R'){
+    int stop_deg = (start_deg - deg_d) % 360;
+    while (deg > stop_deg) {
+      TurnLeft1();
+      gyro.update();
+      deg = gyro.getAngleZ();
+    }
   }
 }
 
@@ -143,7 +155,10 @@ char* substring(char* destination, const char* source, int beg, int n) {
 }
 
 
+
 char* action;
+int collision_rotate_deg = 0;
+
 void handleSerialInput(char* inputStr) {
   const int len = strlen(inputStr);
 
@@ -158,11 +173,11 @@ void handleSerialInput(char* inputStr) {
       ChangeMowerState(Colission);
       Serial.print("A:STOP");
 
-    } else if (!strcmp(lidar_msg, "RHT") || !strcmp(lidar_msg, "LHT")) {  //Lidar requests rotation by some degrees
+    } else if (!strcmp(lidar_msg, "RHT") || !strcmp(lidar_msg, "LFT")) {  //Lidar requests rotation by some degrees
       action = lidar_msg;
       char ch_angle[32];
       substring(ch_angle, inputStr, 6, substr_depth);
-      Serial.println(ch_angle);
+      collision_rotate_deg = atoi(ch_angle);
 
 
     } else if (!strcmp(lidar_msg, "DON")) {  //Lidar is done taking photo
@@ -182,8 +197,8 @@ void handleSerialInput(char* inputStr) {
       case 'A':
         {
           if (MODE == Manual) {
-            MODE = Auto;
             ChangeMowerState(Locate_Path);
+            MODE = Auto;
           }
           break;
         }
@@ -230,7 +245,6 @@ float distance_cm = 400.0;
 int deg = -200;
 int start_deg = -200;
 int to_deg = -200;
-int collision_rotate_deg = 0;
 int16_t ROTATE_STEP_DEG = 37;
 
 int16_t SPEED_HIGH = 150;
@@ -246,7 +260,7 @@ int16_t DISTANCE_COLISSION = 5;
 int16_t LED_BRIGHTNESS = 10;
 
 int LOOP_PERIOD_MS = 100;
-int DEBUG = 1;
+int DEBUG = 0;
 
 
 void ChangeMowerState(int new_state) {
@@ -337,7 +351,7 @@ void loop() {
     case Manual:
       {
         SetLedRing(0, 0, LED_BRIGHTNESS);
-        ChangeSpeed(150);
+        ChangeSpeed(75);
         if (DEBUG) {
           Serial.print("State: ");
           Serial.println(state_manual);
@@ -393,7 +407,7 @@ void loop() {
         SetLedRing(0, LED_BRIGHTNESS, 0);
         distance_cm = ultraSensor.distanceCm();
         deg = GetZAngle();
-        if (0) {
+        if (DEBUG) {
           Serial.print("Distance: ");
           Serial.print(distance_cm);
           Serial.print("\tDegree: ");
@@ -456,7 +470,7 @@ void loop() {
               } else if (distance_cm > DISTANCE_SHORT) {
                 ChangeSpeed(SPEED_SLOW);
               } else if (distance_cm <= DISTANCE_COLISSION || (distance_cm >= 400.0)) {
-                ChangeMowerState(Colission);
+                ChangeMowerState(Back);
               }
               Forward();
               break;
@@ -470,22 +484,15 @@ void loop() {
                 Serial.println("'");
               }
               if(action == "RHT"){
-                if(DEBUG){
-                  Serial.print("I will rotate ");
-                  Serial.print(action);
-                  Serial.print(" ");
-                  Serial.print(collision_rotate_deg);
-                  Serial.println(" degrees.");
-                }
+                Rotate(collision_rotate_deg, action[0]);
+                Stop()
+                char buf[5];
+                itoa();
+                Serial.print("A:POS:");
+                Serial.print(POS_X);
               }
               else if(action == "LHT"){
-                if(DEBUG){
-                  Serial.print("I will rotate ");
-                  Serial.print(action);
-                  Serial.print(" ");
-                  Serial.print(collision_rotate_deg);
-                  Serial.println(" degrees.");
-                }
+                Rotate(collision_rotate_deg, action[0]);
               }
               else if(action == "Rotate"){
               if(DEBUG){
