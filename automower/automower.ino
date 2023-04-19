@@ -11,6 +11,7 @@ SoftwareSerial softuart(13, 12);
 MeSerial mySerial(PORT_8);
 
 MeUltrasonicSensor ultraSensor(PORT_7); /* Ultrasonic module can ONLY be connected to port 3, 4, 6, 7, 8 of base shield. */
+MeLineFollower lineFinder(PORT_9);
 
 MeEncoderOnBoard Encoder_1(SLOT1);
 MeEncoderOnBoard Encoder_2(SLOT2);
@@ -34,6 +35,7 @@ enum Mode MODE = Auto;
 enum state_AutoMower {
   Idle,
   Locate_Path,
+  Away_From_Line,
   Forward_Fast,
   Forward_Approach,
   Colission,
@@ -75,23 +77,30 @@ const char* MSG_FROM_LIDAR_LEFT = "LFT";
 
 
 //Configuration
-const int16_t ROTATE_AVOIDANCE_DEG = 97;
+const int16_t ROTATE_AVOIDANCE_DEG  = 97;
+const int16_t ROTATE_LINE_DEG       = 13;
 
-const int16_t SPEED_HIGH = 150;
-const int16_t SPEED_MEDIUM = 100;
-const int16_t SPEED_SLOW = 75;
+const int16_t SPEED_HIGH    = 160;
+const int16_t SPEED_MEDIUM  = 125;
+const int16_t SPEED_SLOW    = 90;
 
 const int16_t SPEED_MANUAL = SPEED_MEDIUM;
 
-const int16_t DISTANCE_LONG = 50;
-const int16_t DISTANCE_MEDIUM = 30;
-const int16_t DISTANCE_SHORT = 15;
-const int16_t DISTANCE_COLISSION = 5;
+const int16_t DISTANCE_LONG       = 50;
+const int16_t DISTANCE_MEDIUM     = 30;
+const int16_t DISTANCE_SHORT      = 15;
+const int16_t DISTANCE_COLISSION  = 5;
 
 const int16_t LED_BRIGHTNESS = 10;
 
 const int LOOP_PERIOD_MS = 100;
+
 const int DEBUG = 0;
+
+const int WALL_DETECTION_ACTIVE   = 1;
+const int LINE_DETECTION_ACTIVE   = 1; 
+
+const int LINE_IS_BLACK = 0;
 
 
 
@@ -250,9 +259,18 @@ int colission_rotate_deg = 0;
 char colission_rotate_dir = ' ';
 
 float distance_cm = 400.0;
+
+int line_sensor_r = 0;
+int line_sensor_l = 0;
+char line_direction = ' ';
+
 int deg = -200;
 int start_deg = -200;
 int to_deg = -200;
+
+
+int position_x = 0;
+int position_y = 0;
 
 
 
@@ -348,14 +366,9 @@ void handleSerialInput(char* inputStr) {
 
 
 
-int position_x = 0;
-int position_y = 0;
-
-
 
 
 void ChangeMowerState(int new_state) {
-  state_auto = new_state;
 
   switch (new_state) {
     default:
@@ -365,37 +378,62 @@ void ChangeMowerState(int new_state) {
       }
     case Idle:
       {
+        state_auto = new_state;
         //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS, LED_BRIGHTNESS);
         break;
       }
     case Locate_Path:
       {
         Stop();
-        start_deg = deg;
-        ChangeSpeed(SPEED_MEDIUM);
-        //SetLedRing(LED_BRIGHTNESS, 0, 0);
+        if(WALL_DETECTION_ACTIVE){
+          state_auto = new_state;
+          start_deg = deg;
+          ChangeSpeed(SPEED_MEDIUM);
+          //SetLedRing(LED_BRIGHTNESS, 0, 0);
+
+        }
+        else{
+          ChangeMowerState(Forward_Fast);
+        }
         break;
       }
+    case Away_From_Line:
+    {
+      if(LINE_DETECTION_ACTIVE){
+        state_auto = new_state;
+        gyro.begin();
+        Stop();
+        ChangeSpeed(SPEED_SLOW);
+      }
+        else{
+          ChangeMowerState(Locate_Path);
+        }
+      break;
+    }
     case Forward_Fast:
       {
+        state_auto = new_state;
         ChangeSpeed(SPEED_HIGH);
         //SetLedRing(0, LED_BRIGHTNESS, 0);
         break;
       }
     case Forward_Approach:
       {
+        state_auto = new_state;
         ChangeSpeed(SPEED_MEDIUM);
         //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS, 0);
         break;
       }
     case Colission:
       {
+        state_auto = new_state;
         Stop();
         //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS / 2, 0);
         break;
       }
     case Back:
       {
+        state_auto = new_state;
         ChangeSpeed(SPEED_MEDIUM);
         //SetLedRing(LED_BRIGHTNESS, 0, LED_BRIGHTNESS);
         break;
@@ -496,7 +534,23 @@ void loop() {
 
         SetLedRing(0, LED_BRIGHTNESS, 0);
         distance_cm = ultraSensor.distanceCm();
+
+        if(LINE_IS_BLACK){
+          line_sensor_r = !lineFinder.readSensor2();
+          line_sensor_l = !lineFinder.readSensor1();
+        } 
+        else{
+          line_sensor_r = lineFinder.readSensor2();
+          line_sensor_l = lineFinder.readSensor1();
+        }
+
+        int line_sensor_detect = line_sensor_r + line_sensor_l;
+        Serial.print("State: ");
+        Serial.print(state_auto);
+        Serial.print("\tLine sensors: ");
+        Serial.println(line_sensor_detect);
         deg = GetZAngle();
+
 
 
         switch (state_auto) {
@@ -530,18 +584,68 @@ void loop() {
 
               break;
             }
+          case Away_From_Line:
+          {
+            
+            if(line_sensor_l && !line_sensor_r){
+              line_direction = 'R';
+              TurnRight1();
+            }
+            else if(!line_sensor_l && line_sensor_r){
+              line_direction = 'L';
+              TurnLeft1();
+            }
+            else if(line_sensor_l && line_sensor_r){
+              line_direction = '?';
+              Backward();
+            } else if(!line_sensor_l && !line_sensor_r){
+                if(start_deg == -200){
+                  start_deg = GetZAngle();
+                  to_deg = start_deg + ROTATE_LINE_DEG;
+
+                  if(line_direction == 'L'){
+                    to_deg = start_deg - ROTATE_LINE_DEG;
+                  }
+                  
+                }
+                else if (line_direction == 'R' || line_direction == '?'){
+                  if(deg < to_deg){
+                    TurnRight1();
+                  }
+                  else{
+                    ChangeMowerState(Locate_Path);
+                  }
+                }
+                else if (line_direction == 'L'){
+                  if(deg > to_deg){
+                    TurnLeft1();
+                  }
+                  else{
+                    ChangeMowerState(Locate_Path);
+                  }
+                }
+            }
+
+            break;
+          }
           case Forward_Fast:
             {
-              if (distance_cm < DISTANCE_LONG) {
-                ChangeMowerState(Forward_Approach);
+              if(line_sensor_detect){
+                ChangeMowerState(Away_From_Line);
               }
-              Forward();
+              else if (distance_cm < DISTANCE_LONG) {
+                ChangeMowerState(Forward_Approach);
+                Forward();
+              } 
               break;
             }
 
           case Forward_Approach:
             {
-              if (distance_cm >= DISTANCE_LONG) {
+              if(line_sensor_detect){
+                ChangeMowerState(Away_From_Line);
+              }
+              else if (distance_cm >= DISTANCE_LONG) {
 
                 ChangeMowerState(Forward_Fast);
 
