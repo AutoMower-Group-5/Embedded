@@ -12,3 +12,4 @@ Från appen:
 	Backward: 	"D:S"
 	Left:		"D:A"
 	Right: 		"D:D"		
+	Stop:		"D:Q"
