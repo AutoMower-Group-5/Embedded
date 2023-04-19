@@ -1,6 +1,7 @@
 #include <MeAuriga.h>
 #include <SoftwareSerial.h>
 #include <Wire.h>
+#include <math.h>
 
 
 MeGyro gyro(0, 0x69);
@@ -25,6 +26,7 @@ int16_t moveSpeed = 200;
 MeRGBLed led_ring(0, 12);
 #endif
 
+//States
 enum Mode { Manual,
             Auto };
 enum Mode MODE = Auto;
@@ -58,6 +60,39 @@ enum state_Colission {
 enum state_AutoMower state_auto = Locate_Path;
 enum state_ManualMower state_manual = Stopped;
 enum state_Colission state_colission = c_idle;
+
+//Communication
+
+const char* MSG_TO_LIDAR_STOP = "A:STOP\n";
+const char* MSG_TO_LIDAR_OK = "A:OK\n";
+const int   MSG_TO_LIDAR_N_INT = 3;
+
+const char* MSG_FROM_LIDAR_DETECT = "DET";
+const char* MSG_FROM_LIDAR_DONE = "DON";
+const char* MSG_FROM_LIDAR_RIGHT = "RHT";
+const char* MSG_FROM_LIDAR_LEFT = "LFT";
+
+
+
+//Configuration
+const int16_t ROTATE_AVOIDANCE_DEG = 97;
+
+const int16_t SPEED_HIGH = 150;
+const int16_t SPEED_MEDIUM = 100;
+const int16_t SPEED_SLOW = 75;
+
+const int16_t SPEED_MANUAL = SPEED_MEDIUM;
+
+const int16_t DISTANCE_LONG = 50;
+const int16_t DISTANCE_MEDIUM = 30;
+const int16_t DISTANCE_SHORT = 15;
+const int16_t DISTANCE_COLISSION = 5;
+
+const int16_t LED_BRIGHTNESS = 10;
+
+const int LOOP_PERIOD_MS = 100;
+const int DEBUG = 0;
+
 
 
 void SetMotors(float motor1Percent, float motor2Percent) {
@@ -174,6 +209,42 @@ char* substring(char* destination, const char* source, int beg, int n) {
 }
 
 
+void int_to_arr(char* res, int input, const int depth){
+   int i = 0;
+   for(; i < depth; i++){
+       res[i] = '0' + (input/(int)pow(10, depth-1 -i)) % 10;
+   }
+   res[i] = '\0';
+}
+
+void lidar_pos_msg(char* res, int x, int y){
+    char* start = "A:POS:";
+    char x_str[5];
+    char y_str[5];
+    
+    int_to_arr(x_str, x, MSG_TO_LIDAR_N_INT);
+    int_to_arr(y_str, y, MSG_TO_LIDAR_N_INT);
+    
+    int res_ix = 0;
+    for(; start[res_ix] != '\0'; res_ix++){
+        res[res_ix] = start[res_ix];
+    }
+    for(int ix = 0; x_str[ix] != '\0'; ix++, res_ix++){
+        res[res_ix] = x_str[ix];
+    }
+    res[res_ix++] = ':';
+    for(int ix = 0; y_str[ix] != '\0'; ix++, res_ix++){
+        res[res_ix] = y_str[ix];
+    }
+    res[res_ix] = '\n';
+    
+    
+}
+
+
+
+
+
 
 int colission_rotate_deg = 0;
 char colission_rotate_dir = ' ';
@@ -182,37 +253,6 @@ float distance_cm = 400.0;
 int deg = -200;
 int start_deg = -200;
 int to_deg = -200;
-
-//Communication
-
-const char* MSG_TO_LIDAR_STOP = "A:STOP\n";
-const char* MSG_TO_LIDAR_POS = "A:POS:012:345\n";
-const char* MSG_TO_LIDAR_OK = "A:OK\n";
-
-const char* MSG_FROM_LIDAR_DETECT = "DET";
-const char* MSG_FROM_LIDAR_DONE = "DON";
-const char* MSG_FROM_LIDAR_RIGHT = "RHT";
-const char* MSG_FROM_LIDAR_LEFT = "LFT";
-
-
-//Configuration
-const int16_t ROTATE_AVOIDANCE_DEG = 97;
-
-const int16_t SPEED_HIGH = 150;
-const int16_t SPEED_MEDIUM = 100;
-const int16_t SPEED_SLOW = 75;
-
-const int16_t SPEED_MANUAL = SPEED_MEDIUM;
-
-const int16_t DISTANCE_LONG = 50;
-const int16_t DISTANCE_MEDIUM = 30;
-const int16_t DISTANCE_SHORT = 15;
-const int16_t DISTANCE_COLISSION = 5;
-
-const int16_t LED_BRIGHTNESS = 10;
-
-const int LOOP_PERIOD_MS = 100;
-const int DEBUG = 0;
 
 
 
@@ -235,8 +275,10 @@ void handleSerialInput(char* inputStr) {
 
       char ch_angle[32];
       substring(ch_angle, inputStr, 6, substr_depth);
-      colission_rotate_deg = atoi(ch_angle);
+
+      sscanf(ch_angle, "%d", &colission_rotate_deg);
       colission_rotate_dir = lidar_msg[0];
+
       if(colission_rotate_dir == 'L')
         colission_rotate_deg = -colission_rotate_deg;
 
@@ -381,8 +423,12 @@ void setup() {
 
 void loop() {
   delay(LOOP_PERIOD_MS);
-  int i = 0;
 
+
+  position_x = 0;
+  position_x = 0;
+
+  int i = 0;
   char str_serial[32];
   while (Serial.available()) {
     char c = Serial.read();
@@ -541,17 +587,13 @@ void loop() {
                     TurnLeft1();
                   } else{
                     Stop();
-                    Serial.print(MSG_TO_LIDAR_POS);
+                    char msg_to_lidar_pos[32];
+                    lidar_pos_msg(msg_to_lidar_pos, position_x, position_x);
+                    Serial.print(msg_to_lidar_pos);
                     start_deg = -200;
                     to_deg = -200;
                     state_colission = c_idle;
                   }
-                  Serial.print("dir: ");
-                  Serial.print(colission_rotate_dir);
-                  Serial.print("\tto_deg: ");
-                  Serial.print(to_deg);
-                  Serial.print("\tdeg: ");
-                  Serial.println(deg);
                   break;
                 }
                 case c_resume:
