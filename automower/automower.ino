@@ -48,9 +48,16 @@ enum state_ManualMower {
   Right,
   Left
 };
+enum state_Colission {
+  c_stop,
+  c_rotate,
+  c_resume,
+  c_idle
+};
 
 enum state_AutoMower state_auto = Locate_Path;
 enum state_ManualMower state_manual = Stopped;
+enum state_Colission state_colission = c_idle;
 
 
 void SetMotors(float motor1Percent, float motor2Percent) {
@@ -102,27 +109,39 @@ void ChangeSpeed(int16_t spd) {
 void Rotate(int16_t deg_d, char direction) {
   gyro.begin();
   gyro.update();
-  int start_deg = (int)gyro.getAngleZ();
+
+  if(deg_d > 170){
+    deg_d = 170;
+  }
+
+  int start_deg = GetZAngle();
   int deg = start_deg;
 
+  Serial.print("start_deg: ");
+  Serial.println(start_deg);
+
+
   if (direction == 'R') {
-    int stop_deg = (start_deg + deg_d) % 360;
+    int stop_deg = (start_deg + deg_d);
     while (deg < stop_deg) {
+      Serial.print("stop_deg: ");
+      Serial.print(stop_deg);
+      Serial.print("\tdeg: ");
+      Serial.println(deg);
       TurnRight1();
-      gyro.update();
-      deg = gyro.getAngleZ();
+      gyro.fast_update();
+      deg = GetZAngle();
     }
   }
-  else if (direction == 'R'){
-    int stop_deg = (start_deg - deg_d) % 360;
+  else if (direction == 'L'){
+    int stop_deg = (start_deg - deg_d);
     while (deg > stop_deg) {
       TurnLeft1();
-      gyro.update();
-      deg = gyro.getAngleZ();
+      gyro.fast_update();
+      deg = GetZAngle();
     }
   }
 }
-
 
 
 
@@ -156,8 +175,46 @@ char* substring(char* destination, const char* source, int beg, int n) {
 
 
 
-char* action;
-int collision_rotate_deg = 0;
+int colission_rotate_deg = 0;
+char colission_rotate_dir = ' ';
+
+float distance_cm = 400.0;
+int deg = -200;
+int start_deg = -200;
+int to_deg = -200;
+
+//Communication
+
+const char* MSG_TO_LIDAR_STOP = "A:STOP\n";
+const char* MSG_TO_LIDAR_POS = "A:POS:012:345\n";
+const char* MSG_TO_LIDAR_OK = "A:OK\n";
+
+const char* MSG_FROM_LIDAR_DETECT = "DET";
+const char* MSG_FROM_LIDAR_DONE = "DON";
+const char* MSG_FROM_LIDAR_RIGHT = "RHT";
+const char* MSG_FROM_LIDAR_LEFT = "LFT";
+
+
+//Configuration
+const int16_t ROTATE_AVOIDANCE_DEG = 97;
+
+const int16_t SPEED_HIGH = 150;
+const int16_t SPEED_MEDIUM = 100;
+const int16_t SPEED_SLOW = 75;
+
+const int16_t SPEED_MANUAL = SPEED_MEDIUM;
+
+const int16_t DISTANCE_LONG = 50;
+const int16_t DISTANCE_MEDIUM = 30;
+const int16_t DISTANCE_SHORT = 15;
+const int16_t DISTANCE_COLISSION = 5;
+
+const int16_t LED_BRIGHTNESS = 10;
+
+const int LOOP_PERIOD_MS = 100;
+const int DEBUG = 0;
+
+
 
 void handleSerialInput(char* inputStr) {
   const int len = strlen(inputStr);
@@ -166,22 +223,26 @@ void handleSerialInput(char* inputStr) {
     char lidar_msg[32];
     int substr_depth = 3;
     substring(lidar_msg, inputStr, 2, substr_depth);
-
+    state_colission = c_idle;
 
     if (!strcmp(lidar_msg, "DET")) {  //Colission detected by lidar
+      state_colission = c_stop;
 
       ChangeMowerState(Colission);
-      Serial.print("A:STOP");
 
-    } else if (!strcmp(lidar_msg, "RHT") || !strcmp(lidar_msg, "LFT")) {  //Lidar requests rotation by some degrees
-      action = lidar_msg;
+    } else if (!strcmp(lidar_msg, MSG_FROM_LIDAR_RIGHT) || !strcmp(lidar_msg, MSG_FROM_LIDAR_LEFT)) {  //Lidar requests rotation by some degrees
+      state_colission = c_rotate;
+
       char ch_angle[32];
       substring(ch_angle, inputStr, 6, substr_depth);
-      collision_rotate_deg = atoi(ch_angle);
+      colission_rotate_deg = atoi(ch_angle);
+      colission_rotate_dir = lidar_msg[0];
+      if(colission_rotate_dir == 'L')
+        colission_rotate_deg = -colission_rotate_deg;
 
 
     } else if (!strcmp(lidar_msg, "DON")) {  //Lidar is done taking photo
-      action = "Rotate";
+      state_colission = c_resume;
     }
   }
 
@@ -190,6 +251,7 @@ void handleSerialInput(char* inputStr) {
       case 'M':
         {
           if (MODE == Auto) {
+            ChangeSpeed(SPEED_MANUAL);
             MODE = Manual;
           }
           break;
@@ -197,6 +259,9 @@ void handleSerialInput(char* inputStr) {
       case 'A':
         {
           if (MODE == Manual) {
+            deg = -200;
+            start_deg = -200;
+            to_deg = -200;
             ChangeMowerState(Locate_Path);
             MODE = Auto;
           }
@@ -241,26 +306,10 @@ void handleSerialInput(char* inputStr) {
 
 
 
-float distance_cm = 400.0;
-int deg = -200;
-int start_deg = -200;
-int to_deg = -200;
-int16_t ROTATE_STEP_DEG = 37;
+int position_x = 0;
+int position_y = 0;
 
-int16_t SPEED_HIGH = 150;
-int16_t SPEED_MEDIUM = 100;
-int16_t SPEED_SLOW = 75;
 
-//Distance in cm
-int16_t DISTANCE_LONG = 50;
-int16_t DISTANCE_MEDIUM = 30;
-int16_t DISTANCE_SHORT = 15;
-int16_t DISTANCE_COLISSION = 5;
-
-int16_t LED_BRIGHTNESS = 10;
-
-int LOOP_PERIOD_MS = 100;
-int DEBUG = 0;
 
 
 void ChangeMowerState(int new_state) {
@@ -314,7 +363,7 @@ void ChangeMowerState(int new_state) {
 
 void setup() {
   gyro.begin();
-  Serial.begin(115200);
+  Serial.begin(9600);
 
   //Set PWM 8KHz
   TCCR1A = _BV(WGM10);
@@ -351,11 +400,6 @@ void loop() {
     case Manual:
       {
         SetLedRing(0, 0, LED_BRIGHTNESS);
-        ChangeSpeed(75);
-        if (DEBUG) {
-          Serial.print("State: ");
-          Serial.println(state_manual);
-        }
         switch (state_manual) {
           case Stopped:
             {
@@ -407,18 +451,6 @@ void loop() {
         SetLedRing(0, LED_BRIGHTNESS, 0);
         distance_cm = ultraSensor.distanceCm();
         deg = GetZAngle();
-        if (DEBUG) {
-          Serial.print("Distance: ");
-          Serial.print(distance_cm);
-          Serial.print("\tDegree: ");
-          Serial.print(deg);
-          Serial.print(" start_deg: ");
-          Serial.print(start_deg);
-          Serial.print(" to_deg: ");
-          Serial.print(to_deg);
-          Serial.print("\tState: ");
-          Serial.println(state_auto);
-        }
 
 
         switch (state_auto) {
@@ -437,10 +469,12 @@ void loop() {
                 TurnRight1();
 
               } else if ((distance_cm <= DISTANCE_MEDIUM) || (distance_cm >= 400.0)) {
+
                 Stop();
                 gyro.begin();
                 start_deg = GetZAngle();
-                to_deg = (start_deg + ROTATE_STEP_DEG) % 360;
+                to_deg = (start_deg + ROTATE_AVOIDANCE_DEG) % 360;
+
               } else {
                 Stop();
                 start_deg = -200;
@@ -478,33 +512,61 @@ void loop() {
 
           case Colission:
             {
-              if(DEBUG){
-                Serial.print("Action: '");
-                Serial.print(action);
-                Serial.println("'");
-              }
-              if(action == "RHT"){
-                Rotate(collision_rotate_deg, action[0]);
-                Stop()
-                char buf[5];
-                itoa();
-                Serial.print("A:POS:");
-                Serial.print(POS_X);
-              }
-              else if(action == "LHT"){
-                Rotate(collision_rotate_deg, action[0]);
-              }
-              else if(action == "Rotate"){
-              if(DEBUG){
-                Serial.print("I will rotate away from object");
-              }
-                
+              switch (state_colission)
+              {
+                case c_idle:
+                {
+                  Stop();
+                  break;
+                }
+                case c_stop:
+                {
+                  Stop();
+                  Serial.print(MSG_TO_LIDAR_STOP);
+                  state_colission = c_idle;
+                  break;
+                }
+                case c_rotate:
+                {
+                  if (start_deg == -200) { 
+                      gyro.begin();
+                      start_deg = GetZAngle();
+                      deg = start_deg;
+                      to_deg = start_deg + colission_rotate_deg;
 
+                  } else if (colission_rotate_dir == 'R' && deg < to_deg){
+                    
+                    TurnRight1();
+                  } else if (colission_rotate_dir == 'L' && deg > to_deg){
+                    TurnLeft1();
+                  } else{
+                    Stop();
+                    Serial.print(MSG_TO_LIDAR_POS);
+                    start_deg = -200;
+                    to_deg = -200;
+                    state_colission = c_idle;
+                  }
+                  Serial.print("dir: ");
+                  Serial.print(colission_rotate_dir);
+                  Serial.print("\tto_deg: ");
+                  Serial.print(to_deg);
+                  Serial.print("\tdeg: ");
+                  Serial.println(deg);
+                  break;
+                }
+                case c_resume:
+                {
+                  ChangeMowerState(Locate_Path);
+                  state_colission = c_idle;
+                  Serial.print(MSG_TO_LIDAR_OK);
+                  break;
+                }
+                default:
+                {
+                  break;
+                }
               }
-              else if(action == "Continue"){
-                action = "";
-                ChangeMowerState(Forward_Fast);
-              }
+              
               break;
             }
           case Back:
