@@ -1,3 +1,6 @@
+import base64
+
+import websockets
 from picamera import PiCamera
 from time import sleep
 from datetime import datetime
@@ -26,15 +29,16 @@ def choose_from_list():
         seconds = int(input("Insert the seconds: "))
         sleep_for_sec = int(input("For each seconds do you want to capture pictures: "))
         for x in range(seconds):
-            capture_picture()
+            path = capture_picture()
+            send_picture(path)
             sleep(sleep_for_sec)
         
         
     elif ans == 2:
         sleep_for_sec = int(input("For each seconds do you want to capture pictures: "))
         while True:
-            #capture_picture()
-            capture_picture()
+            path = capture_picture()
+            send_picture(path)
             sleep(sleep_for_sec)
             
         
@@ -47,7 +51,8 @@ def choose_from_list():
             if key == 's':
                 keyboard.wait('s')  # Wait for the 's' key to be pressed
                 while run:
-                    capture_picture()
+                    path = capture_picture()
+                    send_picture(path)
                     sleep(sleep_for_sec)
                     if keyboard.is_pressed("e"):
                         run = 0 
@@ -60,6 +65,17 @@ def choose_from_list():
 def capture_picture():
     date = get_date()
     camera.capture(f'/home/imsan00/Desktop/mover_capture_images/captured_images{date}.jpg')
+    path = f'/home/imsan00/Desktop/mover_capture_images/captured_images{date}.jpg'
+    return path
+
+def send_picture(path):
+    image = image.open(path)
+    image_bytes = image.tobytes()
+    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+    ws = websockets.create_connection("ws://example.com/websocket")
+    ws.send(image_base64)
+    ws.close()
+
     
 
 
