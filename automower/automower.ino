@@ -458,7 +458,6 @@ void ChangeMowerState(int new_state) {
 void setup() {
   gyro.begin();
   Serial.begin(9600);
-  timer.start();
 
   //Set PWM 8KHz
   TCCR1A = _BV(WGM10);
@@ -627,26 +626,27 @@ void loop() {
           {
             if(line_sensor_detect >= 1){
               if(backing_stop_time == 0){
+                timer.start();
                 backing_stop_time = timer.read() + BACK_WHEN_LINE_DETECED_MS;
               }
               
-              if((timer.read() < backing_stop_time)){
-                Backward();
-                if(line_sensor_l && !line_sensor_r){
-                  line_direction = 'R';
-                }
-                else if(!line_sensor_l && line_sensor_r){
-                  line_direction = 'L';
-                }
-                else if(line_sensor_l && line_sensor_r){
-                  line_direction = '?';
-                }
+              Backward();
+              if(line_sensor_l && !line_sensor_r){
+                line_direction = 'R';
               }
+              else if(!line_sensor_l && line_sensor_r){
+                line_direction = 'L';
+              }
+              else if(line_sensor_l && line_sensor_r){
+                line_direction = '?';
+              }
+            
            
             } 
             
-            else if(line_sensor_detect == 0){
+            else if((timer.read() > backing_stop_time) && line_sensor_detect == 0){
                 backing_stop_time = 0;
+                timer.stop();
                 if(start_deg == -200){
                   
                   start_deg = GetZAngle();
