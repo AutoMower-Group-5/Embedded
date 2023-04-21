@@ -106,11 +106,12 @@ const int WALL_DETECTION_ACTIVE   = 0;
   const int16_t DISTANCE_COLISSION  = 5;
 
 const int LINE_DETECTION_ACTIVE   = 1; 
-  const int BACK_WHEN_LINE_DETECED_MS = 2000;
+  const int BACK_WHEN_LINE_DETECED_MS = 500;
   const int16_t ROTATE_LINE_DEG       = 97;
 
 const int LINE_IS_BLACK = 1;
 
+int is_backing = 0;
 
 
 void SetMotors(float motor1Percent, float motor2Percent) {
@@ -119,11 +120,13 @@ void SetMotors(float motor1Percent, float motor2Percent) {
 }
 
 void Forward(void) {
+  is_backing = 0;
   Encoder_1.setMotorPwm(-moveSpeed);  // setMotorPwm writes to the encoder controller
   Encoder_2.setMotorPwm(moveSpeed);   // so setting the speed change instantly
 }
 
 void Backward(void) {
+  is_backing = 1;
   Encoder_1.setMotorPwm(moveSpeed);
   Encoder_2.setMotorPwm(-moveSpeed);
 }
@@ -625,12 +628,14 @@ void loop() {
           case Away_From_Line:
           {
             if(line_sensor_detect >= 1){
+              
+
               if(backing_stop_time == 0){
                 timer.start();
                 backing_stop_time = timer.read() + BACK_WHEN_LINE_DETECED_MS;
-              }
+                Backward();
+              }              
               
-              Backward();
               if(line_sensor_l && !line_sensor_r){
                 line_direction = 'R';
               }
@@ -640,11 +645,10 @@ void loop() {
               else if(line_sensor_l && line_sensor_r){
                 line_direction = '?';
               }
-            
            
             } 
             
-            else if((timer.read() > backing_stop_time) && line_sensor_detect == 0){
+            else if((timer.read() >= backing_stop_time) && line_sensor_detect == 0){
                 backing_stop_time = 0;
                 timer.stop();
                 if(start_deg == -200){
