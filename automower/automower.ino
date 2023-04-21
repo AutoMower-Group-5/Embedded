@@ -2,7 +2,9 @@
 #include <SoftwareSerial.h>
 #include <Wire.h>
 #include <math.h>
+#include "Timer.h"
 
+Timer timer;
 
 MeGyro gyro(0, 0x69);
 
@@ -60,7 +62,7 @@ enum state_Colission {
   c_idle
 };
 
-enum state_AutoMower state_auto = Locate_Path;
+enum state_AutoMower state_auto = Idle;
 enum state_ManualMower state_manual = Stopped;
 enum state_Colission state_colission = c_idle;
 
@@ -78,28 +80,34 @@ const char* MSG_FROM_LIDAR_LEFT = "LFT";
 
 
 //Configuration
-const int16_t ROTATE_AVOIDANCE_DEG  = 97;
-const int16_t ROTATE_LINE_DEG       = 13;
-
-const int16_t SPEED_HIGH    = 170;
-const int16_t SPEED_MEDIUM  = 140;
-const int16_t SPEED_SLOW    = 110;
-
-const int16_t SPEED_MANUAL = SPEED_MEDIUM;
-
-const int16_t DISTANCE_LONG       = 50;
-const int16_t DISTANCE_MEDIUM     = 30;
-const int16_t DISTANCE_SHORT      = 15;
-const int16_t DISTANCE_COLISSION  = 5;
-
-const int16_t LED_BRIGHTNESS = 10;
-
-const int LOOP_PERIOD_MS = 20;
 
 const int DEBUG = 0;
 
-const int WALL_DETECTION_ACTIVE   = 1;
+
+const int SPEED_FACTOR = 1 + DEBUG;
+const int16_t SPEED_HIGH    = 100/SPEED_FACTOR;
+const int16_t SPEED_MEDIUM  = 75/SPEED_FACTOR;
+const int16_t SPEED_SLOW    = 50/SPEED_FACTOR;
+
+const int16_t SPEED_MANUAL = SPEED_MEDIUM;
+const int16_t SPEED_ROTATION = SPEED_SLOW;
+
+
+
+const int16_t LED_BRIGHTNESS = 10;
+
+const int SERIAL_DELAY_MS = 20;
+
+const int WALL_DETECTION_ACTIVE   = 0;
+  const int16_t ROTATE_AVOIDANCE_DEG  = 37;
+  const int16_t DISTANCE_LONG       = 50;
+  const int16_t DISTANCE_MEDIUM     = 30;
+  const int16_t DISTANCE_SHORT      = 15;
+  const int16_t DISTANCE_COLISSION  = 5;
+
 const int LINE_DETECTION_ACTIVE   = 1; 
+  const int BACK_WHEN_LINE_DETECED_MS = 2000;
+  const int16_t ROTATE_LINE_DEG       = 97;
 
 const int LINE_IS_BLACK = 1;
 
@@ -246,7 +254,8 @@ void lidar_pos_msg(char* res, int x, int y){
     for(int ix = 0; y_str[ix] != '\0'; ix++, res_ix++){
         res[res_ix] = y_str[ix];
     }
-    res[res_ix] = '\n';
+    res[res_ix++] = '\n';
+    res[res_ix] = '\0';
     
     
 }
@@ -269,6 +278,7 @@ int deg = -200;
 int start_deg = -200;
 int to_deg = -200;
 
+int backing_stop_time = 0;
 
 int position_x = 0;
 int position_y = 0;
@@ -385,11 +395,11 @@ void ChangeMowerState(int new_state) {
       }
     case Locate_Path:
       {
-        Stop();
         if(WALL_DETECTION_ACTIVE){
+          Stop();
           state_auto = new_state;
           start_deg = deg;
-          ChangeSpeed(SPEED_MEDIUM);
+          ChangeSpeed(SPEED_ROTATION);
           //SetLedRing(LED_BRIGHTNESS, 0, 0);
 
         }
@@ -430,6 +440,8 @@ void ChangeMowerState(int new_state) {
       {
         state_auto = new_state;
         Stop();
+        ChangeSpeed(SPEED_ROTATION);
+        backing_stop_time = 0;
         //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS / 2, 0);
         break;
       }
@@ -446,6 +458,7 @@ void ChangeMowerState(int new_state) {
 void setup() {
   gyro.begin();
   Serial.begin(9600);
+  timer.start();
 
   //Set PWM 8KHz
   TCCR1A = _BV(WGM10);
@@ -459,24 +472,46 @@ void setup() {
 #endif
 }
 
+int prev_state = 0;
 
 
 void loop() {
-  delay(LOOP_PERIOD_MS);
-
 
   position_x = 0;
   position_x = 0;
 
   int i = 0;
   char str_serial[32];
-  while (Serial.available()) {
-    char c = Serial.read();
-    if (c != '\n') {
-      str_serial[i] = c;
-      i++;
+
+  if(Serial.available()){
+    delay(SERIAL_DELAY_MS);
+    while (Serial.available()) {
+      char c = Serial.read();
+      if (c != '\n') {
+        str_serial[i] = c;
+        i++;
+      }
+    }
+    Serial.flush();
+  }
+  
+
+  if(DEBUG){
+    if(prev_state != state_auto)
+    {
+      Serial.print("State: ");
+      Serial.println(state_auto);
+      if(state_auto == Away_From_Line){
+        Serial.print("L: ");
+        Serial.print(line_sensor_l);
+        Serial.print("\tR: ");
+        Serial.println(line_sensor_r);
+      }
+
     }
   }
+  prev_state = state_auto; 
+
   if (i > 0) {
     str_serial[i] = '\0';
     handleSerialInput(str_serial);
@@ -535,7 +570,9 @@ void loop() {
       {
 
         SetLedRing(0, LED_BRIGHTNESS, 0);
-        distance_cm = ultraSensor.distanceCm();
+        if(WALL_DETECTION_ACTIVE){
+          distance_cm = ultraSensor.distanceCm();
+        }
 
         if(LINE_IS_BLACK){
           line_sensor_r = !lineFinder.readSensor2();
@@ -547,10 +584,6 @@ void loop() {
         }
 
         int line_sensor_detect = line_sensor_r + line_sensor_l;
-        Serial.print("State: ");
-        Serial.print(state_auto);
-        Serial.print("\tLine sensors: ");
-        Serial.println(line_sensor_detect);
         deg = GetZAngle();
 
 
@@ -561,7 +594,11 @@ void loop() {
             }
           case Idle:
             {
-              ChangeMowerState(Locate_Path);
+              if(WALL_DETECTION_ACTIVE){
+                ChangeMowerState(Locate_Path);
+              } else{
+                ChangeMowerState(Forward_Fast);
+              }
               break;
             }
 
@@ -588,30 +625,40 @@ void loop() {
             }
           case Away_From_Line:
           {
+            if(line_sensor_detect >= 1){
+              if(backing_stop_time == 0){
+                backing_stop_time = timer.read() + BACK_WHEN_LINE_DETECED_MS;
+              }
+              
+              if((timer.read() < backing_stop_time)){
+                Backward();
+                if(line_sensor_l && !line_sensor_r){
+                  line_direction = 'R';
+                }
+                else if(!line_sensor_l && line_sensor_r){
+                  line_direction = 'L';
+                }
+                else if(line_sensor_l && line_sensor_r){
+                  line_direction = '?';
+                }
+              }
+           
+            } 
             
-            if(line_sensor_l && !line_sensor_r){
-              line_direction = 'R';
-              TurnRight1();
-            }
-            else if(!line_sensor_l && line_sensor_r){
-              line_direction = 'L';
-              TurnLeft1();
-            }
-            else if(line_sensor_l && line_sensor_r){
-              line_direction = '?';
-              Backward();
-            } else if(!line_sensor_l && !line_sensor_r){
+            else if(line_sensor_detect == 0){
+                backing_stop_time = 0;
                 if(start_deg == -200){
+                  
                   start_deg = GetZAngle();
                   to_deg = start_deg + ROTATE_LINE_DEG;
 
                   if(line_direction == 'L'){
-                    to_deg = start_deg - ROTATE_LINE_DEG;
+                    to_deg = abs(start_deg - ROTATE_LINE_DEG);
                   }
                   
                 }
                 else if (line_direction == 'R' || line_direction == '?'){
-                  if(deg < to_deg){
+                  if(abs(deg) < to_deg){
                     TurnRight1();
                   }
                   else{
@@ -619,7 +666,7 @@ void loop() {
                   }
                 }
                 else if (line_direction == 'L'){
-                  if(deg > to_deg){
+                  if(abs(deg) < to_deg){
                     TurnLeft1();
                   }
                   else{
