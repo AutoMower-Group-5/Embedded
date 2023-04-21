@@ -41,6 +41,7 @@ enum state_AutoMower {
   Colission,
   Back
 };
+
 enum state_ManualMower {
   Stopped,
   Forwards,
@@ -80,9 +81,9 @@ const char* MSG_FROM_LIDAR_LEFT = "LFT";
 const int16_t ROTATE_AVOIDANCE_DEG  = 97;
 const int16_t ROTATE_LINE_DEG       = 13;
 
-const int16_t SPEED_HIGH    = 160;
-const int16_t SPEED_MEDIUM  = 125;
-const int16_t SPEED_SLOW    = 90;
+const int16_t SPEED_HIGH    = 170;
+const int16_t SPEED_MEDIUM  = 140;
+const int16_t SPEED_SLOW    = 110;
 
 const int16_t SPEED_MANUAL = SPEED_MEDIUM;
 
@@ -93,14 +94,14 @@ const int16_t DISTANCE_COLISSION  = 5;
 
 const int16_t LED_BRIGHTNESS = 10;
 
-const int LOOP_PERIOD_MS = 100;
+const int LOOP_PERIOD_MS = 20;
 
 const int DEBUG = 0;
 
 const int WALL_DETECTION_ACTIVE   = 1;
 const int LINE_DETECTION_ACTIVE   = 1; 
 
-const int LINE_IS_BLACK = 0;
+const int LINE_IS_BLACK = 1;
 
 
 
@@ -135,12 +136,12 @@ void TurnRight(void) {
   Encoder_2.setMotorPwm(moveSpeed);
 }
 void TurnLeft1(void) {
-  Encoder_1.setMotorPwm(-moveSpeed);
-  Encoder_2.setMotorPwm(-moveSpeed);
+  Encoder_1.setMotorPwm(-2*moveSpeed);
+  Encoder_2.setMotorPwm(-2*moveSpeed);
 }
 void TurnRight1(void) {
-  Encoder_1.setMotorPwm(moveSpeed);
-  Encoder_2.setMotorPwm(moveSpeed);
+  Encoder_1.setMotorPwm(2*moveSpeed);
+  Encoder_2.setMotorPwm(2*moveSpeed);
 }
 void Stop(void) {
   Encoder_1.setMotorPwm(0);
@@ -400,10 +401,10 @@ void ChangeMowerState(int new_state) {
     case Away_From_Line:
     {
       if(LINE_DETECTION_ACTIVE){
-        state_auto = new_state;
-        gyro.begin();
         Stop();
+        state_auto = new_state;
         ChangeSpeed(SPEED_SLOW);
+        gyro.begin();
       }
         else{
           ChangeMowerState(Locate_Path);
@@ -414,6 +415,7 @@ void ChangeMowerState(int new_state) {
       {
         state_auto = new_state;
         ChangeSpeed(SPEED_HIGH);
+        Forward();
         //SetLedRing(0, LED_BRIGHTNESS, 0);
         break;
       }
@@ -635,7 +637,6 @@ void loop() {
               }
               else if (distance_cm < DISTANCE_LONG) {
                 ChangeMowerState(Forward_Approach);
-                Forward();
               } 
               break;
             }
