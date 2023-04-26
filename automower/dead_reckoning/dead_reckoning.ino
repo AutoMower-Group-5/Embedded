@@ -17,6 +17,7 @@ double angleZ = 0;
 
 MeEncoderOnBoard Encoder_1(SLOT1);
 MeEncoderOnBoard Encoder_2(SLOT2);
+MeGyro gyro(0, 0x69);
 
 void SetMotors(float motor1Percent, float motor2Percent) {
   Encoder_1.setMotorPwm((motor1Percent / 100.0) * moveSpeed);
@@ -26,9 +27,21 @@ void SetMotors(float motor1Percent, float motor2Percent) {
 //enum status_t {STOPPED, RUNNING, PAUSED};
 
 void UpdatePos(){
+
+  angleZ = gyro.getAngleZ() * 0.0174532925;
+
   float hypo = ((float)moveSpeed/255.0)*(float)(timer_end - timer_start)/1000;
-  position_x += hypo*cos(angle);
-  position_y += hypo*sin(angle);
+  position_x += hypo*cos(angleZ);
+  position_y += hypo*sin(angleZ);
+
+  Serial.print("Angle:");
+  Serial.print(angleZ);
+  Serial.print(",");
+  Serial.print("X_POS:");
+  Serial.print(position_x * 100);
+  Serial.print(",");
+  Serial.print("Y_POS:");
+  Serial.println(position_y * 100);
 }
 
 void SetSpeed(int newSpeed){
@@ -53,11 +66,12 @@ void MoveBot(int direction){ //Forward = 1, Backward = -1
   SetSpeed(direction*moveSpeed); 
 }
 
-void Stop(void) {
+void StopBot(void) {
   SetSpeed(0);
 }
 
 void setup() {
+  gyro.begin();
   // put your setup code here, to run once:
   Serial.begin(9600);
 
@@ -71,19 +85,8 @@ void setup() {
 
 
 void loop() {
+  gyro.update();
   // put your main code here, to run repeatedly:
   SetSpeed(255);
-  delay(2000);
-  Serial.print("position_x 1:  ");
-  Serial.println(position_x);
-
-  SetSpeed(127);
-  delay(2000);
-  Serial.print("position_x 2:  ");
-  Serial.println(position_x);
-  
-  SetSpeed(-255);
-  delay(500);
-  Serial.print("position_x 3: ");
-  Serial.println(position_x);
+  delay(10);
 }

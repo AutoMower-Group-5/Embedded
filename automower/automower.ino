@@ -5,8 +5,10 @@
 #include "Timer.h"
 
 Timer timer;
+Timer postition_timer;
 
 MeGyro gyro(0, 0x69);
+MeGyro position_gyro(0, 0x69);
 
 unsigned char table[128] = { 0 };
 SoftwareSerial softuart(13, 12);
@@ -32,7 +34,7 @@ MeRGBLed led_ring(0, 12);
 //States
 enum Mode { Manual,
             Auto };
-enum Mode MODE = Auto;
+enum Mode MODE = Manual;
 
 enum state_AutoMower {
   Idle,
@@ -90,7 +92,7 @@ const int16_t SPEED_MEDIUM  = 75/SPEED_FACTOR;
 const int16_t SPEED_SLOW    = 50/SPEED_FACTOR;
 
 const int16_t SPEED_MANUAL = SPEED_MEDIUM;
-const int16_t SPEED_ROTATION = SPEED_SLOW;
+const int16_t SPEED_ROTATION = SPEED_HIGH;
 
 
 
@@ -119,88 +121,29 @@ void SetMotors(float motor1Percent, float motor2Percent) {
   Encoder_2.setMotorPwm((motor2Percent / 100.0) * moveSpeed);
 }
 
-void Forward(void) {
-  is_backing = 0;
-  Encoder_1.setMotorPwm(-moveSpeed);  // setMotorPwm writes to the encoder controller
-  Encoder_2.setMotorPwm(moveSpeed);   // so setting the speed change instantly
-}
-
-void Backward(void) {
-  is_backing = 1;
-  Encoder_1.setMotorPwm(moveSpeed);
-  Encoder_2.setMotorPwm(-moveSpeed);
-}
-void BackwardAndTurnLeft(void) {
-  Encoder_1.setMotorPwm(moveSpeed / 4);
-  Encoder_2.setMotorPwm(-moveSpeed);
-}
-void BackwardAndTurnRight(void) {
-  Encoder_1.setMotorPwm(moveSpeed);
-  Encoder_2.setMotorPwm(-moveSpeed / 4);
-}
-void TurnLeft(void) {
-  Encoder_1.setMotorPwm(-moveSpeed);
-  Encoder_2.setMotorPwm(moveSpeed / 2);
-}
-void TurnRight(void) {
-  Encoder_1.setMotorPwm(-moveSpeed / 2);
-  Encoder_2.setMotorPwm(moveSpeed);
-}
-void TurnLeft1(void) {
-  Encoder_1.setMotorPwm(-2*moveSpeed);
-  Encoder_2.setMotorPwm(-2*moveSpeed);
-}
-void TurnRight1(void) {
-  Encoder_1.setMotorPwm(2*moveSpeed);
-  Encoder_2.setMotorPwm(2*moveSpeed);
-}
-void Stop(void) {
-  Encoder_1.setMotorPwm(0);
-  Encoder_2.setMotorPwm(0);
-}
-void ChangeSpeed(int16_t spd) {
-  moveSpeed = spd;
-}
-
-void Rotate(int16_t deg_d, char direction) {
-  gyro.begin();
-  gyro.update();
-
-  if(deg_d > 170){
-    deg_d = 170;
-  }
-
-  int start_deg = GetZAngle();
-  int deg = start_deg;
-
-  Serial.print("start_deg: ");
-  Serial.println(start_deg);
-
-
-  if (direction == 'R') {
-    int stop_deg = (start_deg + deg_d);
-    while (deg < stop_deg) {
-      Serial.print("stop_deg: ");
-      Serial.print(stop_deg);
-      Serial.print("\tdeg: ");
-      Serial.println(deg);
-      TurnRight1();
-      gyro.fast_update();
-      deg = GetZAngle();
-    }
-  }
-  else if (direction == 'L'){
-    int stop_deg = (start_deg - deg_d);
-    while (deg > stop_deg) {
-      TurnLeft1();
-      gyro.fast_update();
-      deg = GetZAngle();
-    }
-  }
-}
-
-
-
+//void Forward(void) {
+//  is_backing = 0;
+//  Encoder_1.setMotorPwm(-moveSpeed);  // setMotorPwm writes to the encoder controller
+//  Encoder_2.setMotorPwm(moveSpeed);   // so setting the speed change instantly
+//}
+//
+//void Backward(void) {
+//  is_backing = 1;
+//  Encoder_1.setMotorPwm(moveSpeed);
+//  Encoder_2.setMotorPwm(-moveSpeed);
+//}
+//
+//
+//
+//
+//
+//
+//
+//
+//void Stop(void) {
+//  Encoder_1.setMotorPwm(0);
+//  Encoder_2.setMotorPwm(0);
+//}
 
 void SetLedRing(int r, int g, int b) {
   led_ring.setColor(RINGALLLEDS, r, g, b);
@@ -283,10 +226,56 @@ int to_deg = -200;
 
 int backing_stop_time = 0;
 
-int position_x = 0;
-int position_y = 0;
+float position_x = 0;
+float position_y = 0;
+float position_angle = 0;
 
+int timer_start = 0;
+int timer_end = 0;
 
+void UpdatePos(){
+  float hypo = ((float)moveSpeed/255.0)*(float)(timer_end - timer_start)/1000;
+  position_x += hypo*cos(position_angle);
+  position_y += hypo*sin(position_angle);
+
+}
+
+void SetSpeed(int newSpeed){
+  
+  //Serial.print("SET SPEED: ");
+  //Serial.println(newSpeed);
+
+  timer_end = postition_timer.read();
+  postition_timer.stop();
+  UpdatePos();
+
+  if(newSpeed > 255)
+    newSpeed = 255;
+  else if(newSpeed < -255)
+    newSpeed = -255;
+      
+  moveSpeed = newSpeed;
+  Encoder_1.setMotorPwm(-moveSpeed); 
+  Encoder_2.setMotorPwm(moveSpeed);
+
+  postition_timer.start();
+  timer_start = postition_timer.read();  
+}
+
+void StopBot(void) {
+  SetSpeed(0);
+}
+
+void TurnLeft1(void) {
+  //Serial.println("ROTATE L");
+  Encoder_1.setMotorPwm(-SPEED_ROTATION);
+  Encoder_2.setMotorPwm(-SPEED_ROTATION);
+}
+void TurnRight1(void) {
+  //Serial.println("ROTATE R");
+  Encoder_1.setMotorPwm(SPEED_ROTATION);
+  Encoder_2.setMotorPwm(SPEED_ROTATION);
+}
 
 void handleSerialInput(char* inputStr) {
   const int len = strlen(inputStr);
@@ -325,7 +314,7 @@ void handleSerialInput(char* inputStr) {
       case 'M':
         {
           if (MODE == Auto) {
-            ChangeSpeed(SPEED_MANUAL);
+            SetSpeed(SPEED_MANUAL);
             MODE = Manual;
           }
           break;
@@ -351,26 +340,33 @@ void handleSerialInput(char* inputStr) {
       case 'W':
         {
           state_manual = Forwards;
+          SetSpeed(SPEED_HIGH);
           break;
         }
       case 'A':
         {
           state_manual = Left;
+          StopBot();
+          TurnLeft1();
           break;
         }
       case 'S':
         {
           state_manual = Backwards;
+          SetSpeed(-SPEED_HIGH);
           break;
         }
       case 'D':
         {
           state_manual = Right;
+          StopBot();
+          TurnRight1();
           break;
         }
       case 'Q':
         {
           state_manual = Stopped;
+          StopBot();
           break;
         }
     }
@@ -399,10 +395,9 @@ void ChangeMowerState(int new_state) {
     case Locate_Path:
       {
         if(WALL_DETECTION_ACTIVE){
-          Stop();
+          StopBot();
           state_auto = new_state;
           start_deg = deg;
-          ChangeSpeed(SPEED_ROTATION);
           //SetLedRing(LED_BRIGHTNESS, 0, 0);
 
         }
@@ -414,9 +409,8 @@ void ChangeMowerState(int new_state) {
     case Away_From_Line:
     {
       if(LINE_DETECTION_ACTIVE){
-        Stop();
+        StopBot();
         state_auto = new_state;
-        ChangeSpeed(SPEED_SLOW);
         gyro.begin();
       }
         else{
@@ -427,23 +421,20 @@ void ChangeMowerState(int new_state) {
     case Forward_Fast:
       {
         state_auto = new_state;
-        ChangeSpeed(SPEED_HIGH);
-        Forward();
-        //SetLedRing(0, LED_BRIGHTNESS, 0);
+        SetSpeed(SPEED_HIGH);
         break;
       }
     case Forward_Approach:
       {
         state_auto = new_state;
-        ChangeSpeed(SPEED_MEDIUM);
+        SetSpeed(SPEED_MEDIUM);
         //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS, 0);
         break;
       }
     case Colission:
       {
         state_auto = new_state;
-        Stop();
-        ChangeSpeed(SPEED_ROTATION);
+        StopBot();
         backing_stop_time = 0;
         //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS / 2, 0);
         break;
@@ -451,7 +442,7 @@ void ChangeMowerState(int new_state) {
     case Back:
       {
         state_auto = new_state;
-        ChangeSpeed(SPEED_MEDIUM);
+        SetSpeed(SPEED_MEDIUM);
         //SetLedRing(LED_BRIGHTNESS, 0, LED_BRIGHTNESS);
         break;
       }
@@ -460,6 +451,7 @@ void ChangeMowerState(int new_state) {
 
 void setup() {
   gyro.begin();
+  position_gyro.begin();
   Serial.begin(9600);
 
   //Set PWM 8KHz
@@ -478,9 +470,17 @@ int prev_state = 0;
 
 
 void loop() {
-
-  position_x = 0;
-  position_x = 0;
+  position_gyro.update();
+  position_angle = position_gyro.getAngleZ() * 0.0174532925;
+  
+  Serial.print("Angle:");
+  Serial.print(position_angle);
+  Serial.print(",");
+  Serial.print("X_POS:");
+  Serial.print(position_x * 100);
+  Serial.print(",");
+  Serial.print("Y_POS:");
+  Serial.println(position_y * 100);
 
   int i = 0;
   char str_serial[32];
@@ -526,12 +526,10 @@ void loop() {
         switch (state_manual) {
           case Stopped:
             {
-              Stop();
               break;
             }
           case Forwards:
             {
-              Forward();
               break;
             }
           case Forwards_Left:
@@ -544,7 +542,6 @@ void loop() {
             }
           case Backwards:
             {
-              Backward();
               break;
             }
           case Backwards_Left:
@@ -557,12 +554,10 @@ void loop() {
             }
           case Right:
             {
-              TurnRight1();
               break;
             }
           case Left:
             {
-              TurnLeft1();
               break;
             }
         }
@@ -611,13 +606,13 @@ void loop() {
 
               } else if ((distance_cm <= DISTANCE_MEDIUM) || (distance_cm >= 400.0)) {
 
-                Stop();
+                StopBot();
                 gyro.begin();
                 start_deg = GetZAngle();
                 to_deg = (start_deg + ROTATE_AVOIDANCE_DEG) % 360;
 
               } else {
-                Stop();
+                StopBot();
                 start_deg = -200;
                 to_deg = -200;
                 ChangeMowerState(Forward_Fast);
@@ -633,7 +628,7 @@ void loop() {
               if(backing_stop_time == 0){
                 timer.start();
                 backing_stop_time = timer.read() + BACK_WHEN_LINE_DETECED_MS;
-                Backward();
+                SetSpeed(-SPEED_HIGH);
               }              
               
               if(line_sensor_l && !line_sensor_r){
@@ -650,7 +645,10 @@ void loop() {
             
             else if((timer.read() >= backing_stop_time) && line_sensor_detect == 0){
                 backing_stop_time = 0;
-                timer.stop();
+                if(timer.state() == 1){
+                  timer.stop();
+                  StopBot();
+                }
                 if(start_deg == -200){
                   
                   start_deg = GetZAngle();
@@ -702,13 +700,12 @@ void loop() {
                 ChangeMowerState(Forward_Fast);
 
               } else if (distance_cm > DISTANCE_MEDIUM) {
-                ChangeSpeed(SPEED_MEDIUM);
+                SetSpeed(SPEED_MEDIUM);
               } else if (distance_cm > DISTANCE_SHORT) {
-                ChangeSpeed(SPEED_SLOW);
+                SetSpeed(SPEED_SLOW);
               } else if (distance_cm <= DISTANCE_COLISSION || (distance_cm >= 400.0)) {
                 ChangeMowerState(Back);
               }
-              Forward();
               break;
             }
 
@@ -718,12 +715,12 @@ void loop() {
               {
                 case c_idle:
                 {
-                  Stop();
+                  StopBot();
                   break;
                 }
                 case c_stop:
                 {
-                  Stop();
+                  StopBot();
                   Serial.print(MSG_TO_LIDAR_STOP);
                   state_colission = c_idle;
                   break;
@@ -742,9 +739,9 @@ void loop() {
                   } else if (colission_rotate_dir == 'L' && deg > to_deg){
                     TurnLeft1();
                   } else{
-                    Stop();
+                    StopBot();
                     char msg_to_lidar_pos[32];
-                    lidar_pos_msg(msg_to_lidar_pos, position_x, position_x);
+                    lidar_pos_msg(msg_to_lidar_pos, position_x, position_y);
                     Serial.print(msg_to_lidar_pos);
                     start_deg = -200;
                     to_deg = -200;
@@ -772,7 +769,7 @@ void loop() {
               if (distance_cm >= DISTANCE_SHORT) {
                 ChangeMowerState(Locate_Path);
               }
-              Backward();
+              SetSpeed(-SPEED_HIGH);
               break;
             }
         }
