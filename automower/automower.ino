@@ -19,7 +19,7 @@ MeLineFollower lineFinder(PORT_9);
 
 MeEncoderOnBoard Encoder_1(SLOT1);
 MeEncoderOnBoard Encoder_2(SLOT2);
-int16_t moveSpeed = 200;
+int16_t moveSpeed = 0;
 
 
 #define AURIGARINGLEDNUM 12
@@ -34,7 +34,7 @@ MeRGBLed led_ring(0, 12);
 //States
 enum Mode { Manual,
             Auto };
-enum Mode MODE = Manual;
+enum Mode MODE = Auto;
 
 enum state_AutoMower {
   Idle,
@@ -230,25 +230,79 @@ float position_x = 0;
 float position_y = 0;
 float position_angle = 0;
 
-int timer_start = 0;
-int timer_end = 0;
+//Dead reckoning
+double x_position = 0.0;
+double y_position = 0.0;
+double wheel_base = 0.15; // Distance between wheels in meters
+double wheel_diameter = 0.045; // Wheel diameter in meters
+double wheel_circumference = M_PI * wheel_diameter;
+long previous_left_pulse = 0;
+long previous_right_pulse = 0;
+unsigned long lastUpdateTime = 0;
+unsigned long updateInterval = 500;
 
-void UpdatePos(){
-  float hypo = ((float)moveSpeed/255.0)*(float)(timer_end - timer_start)/1000;
-  position_x += hypo*cos(position_angle);
-  position_y += hypo*sin(position_angle);
-
+void isr_process_encoder1(void)
+{
+  if(digitalRead(Encoder_1.getPortB()) == 0)
+  {
+    Encoder_1.pulsePosMinus();
+  }
+  else
+  {
+    Encoder_1.pulsePosPlus();;
+  }
 }
 
+void isr_process_encoder2(void)
+{
+  if(digitalRead(Encoder_2.getPortB()) == 0)
+  {
+    Encoder_2.pulsePosMinus();
+  }
+  else
+  {
+    Encoder_2.pulsePosPlus();
+  }
+}
+
+void update_position() {
+  long current_left_pulse = Encoder_1.getPulsePos();
+  long current_right_pulse = Encoder_2.getPulsePos();
+  double left_distance = getDistance(current_left_pulse, previous_left_pulse);
+  double right_distance = getDistance(current_right_pulse, previous_right_pulse);
+
+  double delta_distance = (left_distance + right_distance) / 2.0;
+  double heading = position_gyro.getAngleZ(); // Get the heading from the gyro
+  double delta_heading = heading * (M_PI / 180.0); // Convert the heading from degrees to radians
+
+  x_position += delta_distance * cos(delta_heading) * 10;
+  y_position += delta_distance * sin(delta_heading) * 10;
+
+  previous_left_pulse = current_left_pulse;
+  previous_right_pulse = current_right_pulse;
+}
+
+double getDistance(long current_pulse, long previous_pulse) {
+  long delta_pulse = current_pulse - previous_pulse;
+  double distance = (delta_pulse / 360.0) * wheel_circumference;
+  return distance;
+}
+
+void print_position() {
+  //Serial.print("X: ");
+  Serial.print(x_position, 4);
+  //Serial.print("m, Y: ");
+  Serial.print(",");
+  Serial.print(y_position, 4);
+  //Serial.print("m, Heading: ");
+  Serial.print(",");
+  double heading_degrees = position_gyro.getAngleZ();
+  Serial.println(heading_degrees, 2);
+  //Serial.println(" degrees");
+}
+
+
 void SetSpeed(int newSpeed){
-  
-  //Serial.print("SET SPEED: ");
-  //Serial.println(newSpeed);
-
-  timer_end = postition_timer.read();
-  postition_timer.stop();
-  UpdatePos();
-
   if(newSpeed > 255)
     newSpeed = 255;
   else if(newSpeed < -255)
@@ -258,21 +312,22 @@ void SetSpeed(int newSpeed){
   Encoder_1.setMotorPwm(-moveSpeed); 
   Encoder_2.setMotorPwm(moveSpeed);
 
-  postition_timer.start();
-  timer_start = postition_timer.read();  
+ // Serial.print("\tNEW SPEED: ");
+ // Serial.println(moveSpeed);
 }
 
 void StopBot(void) {
   SetSpeed(0);
 }
 
+
+int rot_dir = 1;
+
 void TurnLeft1(void) {
-  //Serial.println("ROTATE L");
   Encoder_1.setMotorPwm(-SPEED_ROTATION);
   Encoder_2.setMotorPwm(-SPEED_ROTATION);
 }
 void TurnRight1(void) {
-  //Serial.println("ROTATE R");
   Encoder_1.setMotorPwm(SPEED_ROTATION);
   Encoder_2.setMotorPwm(SPEED_ROTATION);
 }
@@ -373,11 +428,6 @@ void handleSerialInput(char* inputStr) {
   }
 }
 
-
-
-
-
-
 void ChangeMowerState(int new_state) {
 
   switch (new_state) {
@@ -450,15 +500,21 @@ void ChangeMowerState(int new_state) {
 }
 
 void setup() {
+  attachInterrupt(Encoder_1.getIntNum(), isr_process_encoder1, RISING);
+  attachInterrupt(Encoder_2.getIntNum(), isr_process_encoder2, RISING);
   gyro.begin();
   position_gyro.begin();
   Serial.begin(9600);
+  delay(2000);
 
   //Set PWM 8KHz
   TCCR1A = _BV(WGM10);
   TCCR1B = _BV(CS11) | _BV(WGM12);
   TCCR2A = _BV(WGM21) | _BV(WGM20);
   TCCR2B = _BV(CS21);
+
+  update_position();
+  print_position();
 
 #ifdef MeAuriga_H
   // 12 LED Ring controller is on Auriga D44/PWM
@@ -468,19 +524,27 @@ void setup() {
 
 int prev_state = 0;
 
-
 void loop() {
-  position_gyro.update();
-  position_angle = position_gyro.getAngleZ() * 0.0174532925;
   
-  Serial.print("Angle:");
-  Serial.print(position_angle);
-  Serial.print(",");
-  Serial.print("X_POS:");
-  Serial.print(position_x * 100);
-  Serial.print(",");
-  Serial.print("Y_POS:");
-  Serial.println(position_y * 100);
+  position_gyro.update();
+  update_position();
+  
+  unsigned long currentTime = millis();
+  
+  if (currentTime - lastUpdateTime >= updateInterval) {
+
+    //print_position();
+    lastUpdateTime = currentTime;
+  }
+  
+//  Serial.print("Angle:");
+//  Serial.print(position_angle);
+//  Serial.print(",");
+//  Serial.print("X_POS:");
+//  Serial.print(position_x * 100);
+//  Serial.print(",");
+//  Serial.print("Y_POS:");
+//  Serial.println(position_y * 100);
 
   int i = 0;
   char str_serial[32];
@@ -624,12 +688,12 @@ void loop() {
           {
             if(line_sensor_detect >= 1){
               
-
               if(backing_stop_time == 0){
                 timer.start();
                 backing_stop_time = timer.read() + BACK_WHEN_LINE_DETECED_MS;
                 SetSpeed(-SPEED_HIGH);
-              }              
+                print_position();
+              }
               
               if(line_sensor_l && !line_sensor_r){
                 line_direction = 'R';
@@ -694,6 +758,7 @@ void loop() {
             {
               if(line_sensor_detect){
                 ChangeMowerState(Away_From_Line);
+                //print_position();
               }
               else if (distance_cm >= DISTANCE_LONG) {
 
