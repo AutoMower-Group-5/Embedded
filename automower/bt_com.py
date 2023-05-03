@@ -15,8 +15,8 @@ def run_bt_com():
     port = server_socket.getsockname()[1]
     uuid = "94f39d29-7d6d-437d-973b-fba39e49d4ab"
 
-    arduino_port = "/tmp/vp2"
-    baud_rate = 9600
+    arduino_port = "/dev/ttyUSB1"
+    baud_rate = 115200
 
     bluetooth.advertise_service(server_socket, "AutoMower", service_id=uuid, service_classes=[uuid, bluetooth.SERIAL_PORT_CLASS], profiles=[bluetooth.SERIAL_PORT_PROFILE])
 
