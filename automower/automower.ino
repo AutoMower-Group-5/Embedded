@@ -32,9 +32,15 @@ MeRGBLed led_ring(0, 12);
 #endif
 
 //States
-enum Mode { Manual,
+enum Mode { Boot,
+            Manual,
             Auto };
-enum Mode MODE = Auto;
+enum Mode MODE = Boot;
+
+enum state_BootMower{
+  Send_Notification,
+  Wait_For_Ack
+};
 
 enum state_AutoMower {
   Idle,
@@ -65,6 +71,7 @@ enum state_Colission {
   c_idle
 };
 
+enum state_BootMower state_boot = Send_Notification;
 enum state_AutoMower state_auto = Idle;
 enum state_ManualMower state_manual = Stopped;
 enum state_Colission state_colission = c_idle;
@@ -84,13 +91,15 @@ const char* BOOT_MSG = "BOOTED\n";
 
 //Configuration
 
+const int DEFAULT_MODE = Auto;
+
 const int DEBUG = 0;
 
 unsigned long INTERVAL_POS_PRINT_MS = 500;
 
-const float LIDAR_DIST_COLISSION = 5.0;
-const float LIDAR_MOUNT_DIST_TO_MIDDLE = 7.0;
-const float LIDAR_MOUNT_ANGLE = 45.0*((float)M_PI/180.0);
+const float LIDAR_DIST_COLISSION = 25.0;
+const float LIDAR_MOUNT_DIST_TO_MIDDLE = 8.0;
+const float LIDAR_MOUNT_ANGLE = 22.0*((float)M_PI/180.0);
 
 const float LIDAR_MOUNT_OFFSET_TO_OBJ = LIDAR_MOUNT_DIST_TO_MIDDLE + LIDAR_DIST_COLISSION*cos(LIDAR_MOUNT_ANGLE);
 
@@ -121,9 +130,10 @@ const int BACK_WHEN_LINE_DETECED_MS = 500;
 const int16_t ROTATE_LINE_DEG_MIN = 79;
 const int16_t ROTATE_LINE_DEG_MAX = 117;
 
+const int WAIT_FOR_BOOT = 1;
+
 const int LINE_IS_BLACK = 1;
 
-int is_backing = 0;
 
 
 void set_motors(float motor1Percent, float motor2Percent) {
@@ -226,6 +236,8 @@ long previous_left_pulse = 0;
 long previous_right_pulse = 0;
 unsigned long lastUpdateTime = 0;
 
+int r_pi_booted = 0; 
+
 void isr_process_encoder1(void) {
   if (digitalRead(Encoder_1.getPortB()) == 0) {
     Encoder_1.pulsePosMinus();
@@ -326,8 +338,6 @@ void stop_bot(void) {
 }
 
 
-int rot_dir = 1;
-
 void rotate_left(void) {
   Encoder_1.setMotorPwm(-SPEED_ROTATION);
   Encoder_2.setMotorPwm(-SPEED_ROTATION);
@@ -339,6 +349,10 @@ void rotate_right(void) {
 
 void handleSerialInput(char* inputStr) {
   const int len = strlen(inputStr);
+
+  if(inputStr[0] == 'B' && !r_pi_booted){
+    r_pi_booted = 1;
+  }
 
   if (inputStr[0] == 'P' && inputStr[1] == 'O' && inputStr[2] == 'S') {
     print_position();
@@ -449,7 +463,6 @@ void change_mower_state(int new_state) {
     case Idle:
       {
         state_auto = new_state;
-        //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS, LED_BRIGHTNESS);
         break;
       }
     case Locate_Path:
@@ -458,7 +471,6 @@ void change_mower_state(int new_state) {
           stop_bot();
           state_auto = new_state;
           start_deg = deg;
-          //SetLedRing(LED_BRIGHTNESS, 0, 0);
 
         } else {
           change_mower_state(Forward_Fast);
@@ -510,10 +522,7 @@ void change_mower_state(int new_state) {
 void setup() {
   attachInterrupt(Encoder_1.getIntNum(), isr_process_encoder1, RISING);
   attachInterrupt(Encoder_2.getIntNum(), isr_process_encoder2, RISING);
-  gyro.begin();
-  position_gyro.begin();
   Serial.begin(115200);
-  //delay(2000);
 
   //Set PWM 8KHz
   TCCR1A = _BV(WGM10);
@@ -521,15 +530,14 @@ void setup() {
   TCCR2A = _BV(WGM21) | _BV(WGM20);
   TCCR2B = _BV(CS21);
 
-  update_position();
-
 #ifdef MeAuriga_H
   // 12 LED Ring controller is on Auriga D44/PWM
   led_ring.setpin(44);
 #endif
+  gyro.begin();
+  position_gyro.begin();
+  set_led_ring(LED_BRIGHTNESS, 0, 0);
 }
-
-int has_booted = 0;
 
 void loop() {
 
@@ -563,14 +571,40 @@ void loop() {
     handleSerialInput(str_serial);
   }
 
-  if(!has_booted){
-    Serial.println(BOOT_MSG);
-    has_booted = 1;
-  }
-
-
-
   switch (MODE) {
+    case Boot:
+    {
+      if(WAIT_FOR_BOOT)
+      {
+        set_led_ring(LED_BRIGHTNESS, 0, 0);
+        switch (state_boot) {
+          case Send_Notification:
+          {
+            Serial.print(BOOT_MSG);
+            state_boot = Wait_For_Ack;
+            break;
+          }
+          case Wait_For_Ack:
+          {
+            if(r_pi_booted){
+              MODE = DEFAULT_MODE;
+            }
+            break;
+          }
+
+          default:
+          {
+            break;
+          }
+        }
+      }
+      else{
+        
+        MODE = DEFAULT_MODE;
+      }
+
+      break;
+    }
     case Manual:
       {
         set_led_ring(0, 0, LED_BRIGHTNESS);
