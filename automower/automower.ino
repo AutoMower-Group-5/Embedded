@@ -85,6 +85,8 @@ const char* MSG_FROM_LIDAR_LEFT = "LFT";
 
 const int DEBUG = 0;
 
+unsigned long INTERVAL_POS_PRINT_MS = 500;
+
 
 const int SPEED_FACTOR = 1 + DEBUG;
 const int16_t SPEED_HIGH    = 100/SPEED_FACTOR;
@@ -94,7 +96,7 @@ const int16_t SPEED_SLOW    = 50/SPEED_FACTOR;
 const int16_t SPEED_MANUAL = SPEED_MEDIUM;
 const int16_t SPEED_ROTATION = SPEED_HIGH;
 
-
+const float LENGTH_TO_ROTATION_AXIS = 11.0;
 
 const int16_t LED_BRIGHTNESS = 10;
 
@@ -239,7 +241,6 @@ double wheel_circumference = M_PI * wheel_diameter;
 long previous_left_pulse = 0;
 long previous_right_pulse = 0;
 unsigned long lastUpdateTime = 0;
-unsigned long updateInterval = 500;
 
 void isr_process_encoder1(void)
 {
@@ -288,17 +289,40 @@ double getDistance(long current_pulse, long previous_pulse) {
   return distance;
 }
 
-void print_position() {
-  //Serial.print("X: ");
-  Serial.print(x_position, 4);
-  //Serial.print("m, Y: ");
-  Serial.print(",");
-  Serial.print(y_position, 4);
-  //Serial.print("m, Heading: ");
-  Serial.print(",");
-  double heading_degrees = position_gyro.getAngleZ();
-  Serial.println(heading_degrees, 2);
-  //Serial.println(" degrees");
+
+void print_position(char type = 'P') {
+
+  //Types:  A <=> Lidar position
+  //        P <=> Normal position
+  //Message structure: P:POS:XX...X.XX:YY...Y.YY:A..A.AA\n
+
+  char* header = ":POS";
+  char separator = ':';
+  int decimals = 4;
+
+  Serial.print(type);
+
+  for(int header_ix = 0; header[header_ix] != '\0'; header_ix++){
+    Serial.print(header[header_ix]);
+  }
+
+  if(type == 'P'){
+    Serial.print(separator);
+    Serial.print(x_position, decimals);
+    Serial.print(separator);
+    Serial.print(y_position, decimals);
+    Serial.print(separator);
+
+    double heading_degrees = position_gyro.getAngleZ();
+    Serial.print(heading_degrees, decimals);
+  } else if(type == 'A'){
+    Serial.print(separator);
+    Serial.print(x_position, decimals);
+    Serial.print(separator);
+    Serial.print(y_position, decimals);
+  }
+  Serial.print('\n');
+  
 }
 
 
@@ -323,17 +347,21 @@ void StopBot(void) {
 
 int rot_dir = 1;
 
-void TurnLeft1(void) {
+void rotate_left(void) {
   Encoder_1.setMotorPwm(-SPEED_ROTATION);
   Encoder_2.setMotorPwm(-SPEED_ROTATION);
 }
-void TurnRight1(void) {
+void rotate_right(void) {
   Encoder_1.setMotorPwm(SPEED_ROTATION);
   Encoder_2.setMotorPwm(SPEED_ROTATION);
 }
 
 void handleSerialInput(char* inputStr) {
   const int len = strlen(inputStr);
+
+  if(inputStr[0] == 'P' && inputStr[1] == 'O' && inputStr[2] == 'S'){
+    print_position();
+  }
 
   if (inputStr[0] == 'L' && inputStr[1] == ':' && MODE == Auto) {  //Messages from LIDAR
     char lidar_msg[32];
@@ -402,7 +430,7 @@ void handleSerialInput(char* inputStr) {
         {
           state_manual = Left;
           StopBot();
-          TurnLeft1();
+          rotate_left();
           break;
         }
       case 'S':
@@ -415,7 +443,7 @@ void handleSerialInput(char* inputStr) {
         {
           state_manual = Right;
           StopBot();
-          TurnRight1();
+          rotate_right();
           break;
         }
       case 'Q':
@@ -514,7 +542,6 @@ void setup() {
   TCCR2B = _BV(CS21);
 
   update_position();
-  print_position();
 
 #ifdef MeAuriga_H
   // 12 LED Ring controller is on Auriga D44/PWM
@@ -528,23 +555,9 @@ void loop() {
   
   position_gyro.update();
   update_position();
+  distance_cm = ultraSensor.distanceCm();
   
   unsigned long currentTime = millis();
-  
-  if (currentTime - lastUpdateTime >= updateInterval) {
-
-    //print_position();
-    lastUpdateTime = currentTime;
-  }
-  
-//  Serial.print("Angle:");
-//  Serial.print(position_angle);
-//  Serial.print(",");
-//  Serial.print("X_POS:");
-//  Serial.print(position_x * 100);
-//  Serial.print(",");
-//  Serial.print("Y_POS:");
-//  Serial.println(position_y * 100);
 
   int i = 0;
   char str_serial[32];
@@ -666,7 +679,7 @@ void loop() {
           case Locate_Path:
             {
               if ((to_deg != -200) && (deg < to_deg)) {
-                TurnRight1();
+                rotate_right();
 
               } else if ((distance_cm <= DISTANCE_MEDIUM) || (distance_cm >= 400.0)) {
 
@@ -692,7 +705,6 @@ void loop() {
                 timer.start();
                 backing_stop_time = timer.read() + BACK_WHEN_LINE_DETECED_MS;
                 SetSpeed(-SPEED_HIGH);
-                print_position();
               }
               
               if(line_sensor_l && !line_sensor_r){
@@ -725,7 +737,7 @@ void loop() {
                 }
                 else if (line_direction == 'R' || line_direction == '?'){
                   if(abs(deg) < to_deg){
-                    TurnRight1();
+                    rotate_right();
                   }
                   else{
                     ChangeMowerState(Locate_Path);
@@ -733,7 +745,7 @@ void loop() {
                 }
                 else if (line_direction == 'L'){
                   if(abs(deg) < to_deg){
-                    TurnLeft1();
+                    rotate_left();
                   }
                   else{
                     ChangeMowerState(Locate_Path);
@@ -745,10 +757,19 @@ void loop() {
           }
           case Forward_Fast:
             {
-              if(line_sensor_detect){
+              if ((line_sensor_detect) && (distance_cm < DISTANCE_MEDIUM) && !WALL_DETECTION_ACTIVE)
+              {
+                SetSpeed(0);
+                float angle = ((float)M_PI/180.0)*position_angle;
+                position_x = cos(angle)*LENGTH_TO_ROTATION_AXIS;
+                position_y = sin(angle)*LENGTH_TO_ROTATION_AXIS;
                 ChangeMowerState(Away_From_Line);
               }
-              else if (distance_cm < DISTANCE_LONG) {
+              else if(line_sensor_detect){
+                ChangeMowerState(Away_From_Line);
+              }
+              
+              else if (distance_cm < DISTANCE_LONG && WALL_DETECTION_ACTIVE) {
                 ChangeMowerState(Forward_Approach);
               } 
               break;
@@ -758,7 +779,6 @@ void loop() {
             {
               if(line_sensor_detect){
                 ChangeMowerState(Away_From_Line);
-                //print_position();
               }
               else if (distance_cm >= DISTANCE_LONG) {
 
@@ -796,18 +816,24 @@ void loop() {
                       gyro.begin();
                       start_deg = GetZAngle();
                       deg = start_deg;
+                      if(colission_rotate_deg > 170){
+                        colission_rotate_deg = 170;
+                      }
+                      if(colission_rotate_deg < -170){
+                        colission_rotate_deg = -170;
+                      }
+
                       to_deg = start_deg + colission_rotate_deg;
 
                   } else if (colission_rotate_dir == 'R' && deg < to_deg){
                     
-                    TurnRight1();
+                    rotate_right();
                   } else if (colission_rotate_dir == 'L' && deg > to_deg){
-                    TurnLeft1();
+                    rotate_left();
                   } else{
                     StopBot();
                     char msg_to_lidar_pos[32];
-                    lidar_pos_msg(msg_to_lidar_pos, position_x, position_y);
-                    Serial.print(msg_to_lidar_pos);
+                    print_position('A');
                     start_deg = -200;
                     to_deg = -200;
                     state_colission = c_idle;
@@ -815,10 +841,20 @@ void loop() {
                   break;
                 }
                 case c_resume:
-                {
-                  ChangeMowerState(Locate_Path);
-                  state_colission = c_idle;
-                  Serial.print(MSG_TO_LIDAR_OK);
+                {                  
+                  if (start_deg == -200) { 
+                      gyro.begin();
+                      start_deg = GetZAngle();
+                      deg = start_deg;
+                      to_deg = start_deg + ROTATE_LINE_DEG;
+                  } 
+                  if(deg < to_deg){
+                    rotate_right();
+                  } else{
+                    ChangeMowerState(Locate_Path);
+                    state_colission = c_idle;
+                    Serial.print(MSG_TO_LIDAR_OK);
+                  }
                   break;
                 }
                 default:
