@@ -40,6 +40,7 @@ enum state_AutoMower {
   Idle,
   Locate_Path,
   Away_From_Line,
+  Reset_Pos,
   Forward_Fast,
   Forward_Approach,
   Colission,
@@ -72,14 +73,14 @@ enum state_Colission state_colission = c_idle;
 
 const char* MSG_TO_LIDAR_STOP = "A:STOP\n";
 const char* MSG_TO_LIDAR_OK = "A:OK\n";
-const int   MSG_TO_LIDAR_N_INT = 3;
+const int MSG_TO_LIDAR_N_INT = 3;
 
 const char* MSG_FROM_LIDAR_DETECT = "DET";
 const char* MSG_FROM_LIDAR_DONE = "DON";
 const char* MSG_FROM_LIDAR_RIGHT = "RHT";
 const char* MSG_FROM_LIDAR_LEFT = "LFT";
 
-
+const char* BOOT_MSG = "BOOTED\n";
 
 //Configuration
 
@@ -87,11 +88,17 @@ const int DEBUG = 0;
 
 unsigned long INTERVAL_POS_PRINT_MS = 500;
 
+const float LIDAR_DIST_COLISSION = 5.0;
+const float LIDAR_MOUNT_DIST_TO_MIDDLE = 7.0;
+const float LIDAR_MOUNT_ANGLE = 45.0*((float)M_PI/180.0);
+
+const float LIDAR_MOUNT_OFFSET_TO_OBJ = LIDAR_MOUNT_DIST_TO_MIDDLE + LIDAR_DIST_COLISSION*cos(LIDAR_MOUNT_ANGLE);
+
 
 const int SPEED_FACTOR = 1 + DEBUG;
-const int16_t SPEED_HIGH    = 100/SPEED_FACTOR;
-const int16_t SPEED_MEDIUM  = 75/SPEED_FACTOR;
-const int16_t SPEED_SLOW    = 50/SPEED_FACTOR;
+const int16_t SPEED_HIGH = 100 / SPEED_FACTOR;
+const int16_t SPEED_MEDIUM = 75 / SPEED_FACTOR;
+const int16_t SPEED_SLOW = 50 / SPEED_FACTOR;
 
 const int16_t SPEED_MANUAL = SPEED_MEDIUM;
 const int16_t SPEED_ROTATION = SPEED_HIGH;
@@ -102,63 +109,44 @@ const int16_t LED_BRIGHTNESS = 10;
 
 const int SERIAL_DELAY_MS = 20;
 
-const int WALL_DETECTION_ACTIVE   = 0;
-  const int16_t ROTATE_AVOIDANCE_DEG  = 37;
-  const int16_t DISTANCE_LONG       = 50;
-  const int16_t DISTANCE_MEDIUM     = 30;
-  const int16_t DISTANCE_SHORT      = 15;
-  const int16_t DISTANCE_COLISSION  = 5;
+const int WALL_DETECTION_ACTIVE = 0;
+const int16_t ROTATE_AVOIDANCE_DEG = 37;
+const int16_t DISTANCE_LONG = 50;
+const int16_t DISTANCE_MEDIUM = 30;
+const int16_t DISTANCE_SHORT = 15;
+const int16_t DISTANCE_WALL_COLISSION = 5;
 
-const int LINE_DETECTION_ACTIVE   = 1; 
-  const int BACK_WHEN_LINE_DETECED_MS = 500;
-  const int16_t ROTATE_LINE_DEG       = 97;
+const int LINE_DETECTION_ACTIVE = 1;
+const int BACK_WHEN_LINE_DETECED_MS = 500;
+const int16_t ROTATE_LINE_DEG_MIN = 79;
+const int16_t ROTATE_LINE_DEG_MAX = 117;
 
 const int LINE_IS_BLACK = 1;
 
 int is_backing = 0;
 
 
-void SetMotors(float motor1Percent, float motor2Percent) {
+void set_motors(float motor1Percent, float motor2Percent) {
   Encoder_1.setMotorPwm((motor1Percent / 100.0) * moveSpeed);
   Encoder_2.setMotorPwm((motor2Percent / 100.0) * moveSpeed);
 }
 
-//void Forward(void) {
-//  is_backing = 0;
-//  Encoder_1.setMotorPwm(-moveSpeed);  // setMotorPwm writes to the encoder controller
-//  Encoder_2.setMotorPwm(moveSpeed);   // so setting the speed change instantly
-//}
-//
-//void Backward(void) {
-//  is_backing = 1;
-//  Encoder_1.setMotorPwm(moveSpeed);
-//  Encoder_2.setMotorPwm(-moveSpeed);
-//}
-//
-//
-//
-//
-//
-//
-//
-//
-//void Stop(void) {
-//  Encoder_1.setMotorPwm(0);
-//  Encoder_2.setMotorPwm(0);
-//}
 
-void SetLedRing(int r, int g, int b) {
+void set_led_ring(int r, int g, int b) {
   led_ring.setColor(RINGALLLEDS, r, g, b);
   led_ring.show();
 }
 
-int GetZAngle() {
+int get_z_angle() {
   gyro.fast_update();
   int deg = (int)gyro.getAngleZ();
   return deg;
 }
 
-
+int rotate_line_deg(){
+  int rot_deg = random(ROTATE_LINE_DEG_MIN, ROTATE_LINE_DEG_MAX);
+  return rot_deg;
+}
 
 char* substring(char* destination, const char* source, int beg, int n) {
   while (n > 0) {
@@ -175,37 +163,35 @@ char* substring(char* destination, const char* source, int beg, int n) {
 }
 
 
-void int_to_arr(char* res, int input, const int depth){
-   int i = 0;
-   for(; i < depth; i++){
-       res[i] = '0' + (input/(int)pow(10, depth-1 -i)) % 10;
-   }
-   res[i] = '\0';
+void int_to_arr(char* res, int input, const int depth) {
+  int i = 0;
+  for (; i < depth; i++) {
+    res[i] = '0' + (input / (int)pow(10, depth - 1 - i)) % 10;
+  }
+  res[i] = '\0';
 }
 
-void lidar_pos_msg(char* res, int x, int y){
-    char* start = "A:POS:";
-    char x_str[5];
-    char y_str[5];
-    
-    int_to_arr(x_str, x, MSG_TO_LIDAR_N_INT);
-    int_to_arr(y_str, y, MSG_TO_LIDAR_N_INT);
-    
-    int res_ix = 0;
-    for(; start[res_ix] != '\0'; res_ix++){
-        res[res_ix] = start[res_ix];
-    }
-    for(int ix = 0; x_str[ix] != '\0'; ix++, res_ix++){
-        res[res_ix] = x_str[ix];
-    }
-    res[res_ix++] = ':';
-    for(int ix = 0; y_str[ix] != '\0'; ix++, res_ix++){
-        res[res_ix] = y_str[ix];
-    }
-    res[res_ix++] = '\n';
-    res[res_ix] = '\0';
-    
-    
+void lidar_pos_msg(char* res, int x, int y) {
+  char* start = "A:POS:";
+  char x_str[5];
+  char y_str[5];
+
+  int_to_arr(x_str, x, MSG_TO_LIDAR_N_INT);
+  int_to_arr(y_str, y, MSG_TO_LIDAR_N_INT);
+
+  int res_ix = 0;
+  for (; start[res_ix] != '\0'; res_ix++) {
+    res[res_ix] = start[res_ix];
+  }
+  for (int ix = 0; x_str[ix] != '\0'; ix++, res_ix++) {
+    res[res_ix] = x_str[ix];
+  }
+  res[res_ix++] = ':';
+  for (int ix = 0; y_str[ix] != '\0'; ix++, res_ix++) {
+    res[res_ix] = y_str[ix];
+  }
+  res[res_ix++] = '\n';
+  res[res_ix] = '\0';
 }
 
 
@@ -228,40 +214,31 @@ int to_deg = -200;
 
 int backing_stop_time = 0;
 
-float position_x = 0;
-float position_y = 0;
 float position_angle = 0;
 
 //Dead reckoning
 double x_position = 0.0;
 double y_position = 0.0;
-double wheel_base = 0.15; // Distance between wheels in meters
-double wheel_diameter = 0.045; // Wheel diameter in meters
+double wheel_base = 0.15;       // Distance between wheels in meters
+double wheel_diameter = 0.045;  // Wheel diameter in meters
 double wheel_circumference = M_PI * wheel_diameter;
 long previous_left_pulse = 0;
 long previous_right_pulse = 0;
 unsigned long lastUpdateTime = 0;
 
-void isr_process_encoder1(void)
-{
-  if(digitalRead(Encoder_1.getPortB()) == 0)
-  {
+void isr_process_encoder1(void) {
+  if (digitalRead(Encoder_1.getPortB()) == 0) {
     Encoder_1.pulsePosMinus();
-  }
-  else
-  {
-    Encoder_1.pulsePosPlus();;
+  } else {
+    Encoder_1.pulsePosPlus();
+    ;
   }
 }
 
-void isr_process_encoder2(void)
-{
-  if(digitalRead(Encoder_2.getPortB()) == 0)
-  {
+void isr_process_encoder2(void) {
+  if (digitalRead(Encoder_2.getPortB()) == 0) {
     Encoder_2.pulsePosMinus();
-  }
-  else
-  {
+  } else {
     Encoder_2.pulsePosPlus();
   }
 }
@@ -269,12 +246,14 @@ void isr_process_encoder2(void)
 void update_position() {
   long current_left_pulse = Encoder_1.getPulsePos();
   long current_right_pulse = Encoder_2.getPulsePos();
-  double left_distance = getDistance(current_left_pulse, previous_left_pulse);
-  double right_distance = getDistance(current_right_pulse, previous_right_pulse);
+  double left_distance = get_distance(current_left_pulse, previous_left_pulse);
+  double right_distance = get_distance(current_right_pulse, previous_right_pulse);
+
+  position_gyro.fast_update();
 
   double delta_distance = (left_distance + right_distance) / 2.0;
-  double heading = position_gyro.getAngleZ(); // Get the heading from the gyro
-  double delta_heading = heading * (M_PI / 180.0); // Convert the heading from degrees to radians
+  double heading = position_gyro.getAngleZ();       // Get the heading from the gyro
+  double delta_heading = heading * (M_PI / 180.0);  // Convert the heading from degrees to radians
 
   x_position += delta_distance * cos(delta_heading) * 10;
   y_position += delta_distance * sin(delta_heading) * 10;
@@ -283,7 +262,7 @@ void update_position() {
   previous_right_pulse = current_right_pulse;
 }
 
-double getDistance(long current_pulse, long previous_pulse) {
+double get_distance(long current_pulse, long previous_pulse) {
   long delta_pulse = current_pulse - previous_pulse;
   double distance = (delta_pulse / 360.0) * wheel_circumference;
   return distance;
@@ -302,46 +281,48 @@ void print_position(char type = 'P') {
 
   Serial.print(type);
 
-  for(int header_ix = 0; header[header_ix] != '\0'; header_ix++){
+  for (int header_ix = 0; header[header_ix] != '\0'; header_ix++) {
     Serial.print(header[header_ix]);
   }
 
-  if(type == 'P'){
-    Serial.print(separator);
-    Serial.print(x_position, decimals);
-    Serial.print(separator);
-    Serial.print(y_position, decimals);
-    Serial.print(separator);
+  position_gyro.fast_update();
+  float heading_degrees = position_gyro.getAngleZ();
 
-    double heading_degrees = position_gyro.getAngleZ();
-    Serial.print(heading_degrees, decimals);
-  } else if(type == 'A'){
+  if (type == 'P') {
     Serial.print(separator);
     Serial.print(x_position, decimals);
     Serial.print(separator);
     Serial.print(y_position, decimals);
+    Serial.print(separator);
+    Serial.print(heading_degrees, decimals);
+  } else if (type == 'A') {
+
+    float obj_pos_x = x_position + LIDAR_MOUNT_OFFSET_TO_OBJ*cos(heading_degrees* (M_PI/180.0));
+    float obj_pos_y = y_position + LIDAR_MOUNT_OFFSET_TO_OBJ*sin(heading_degrees* (M_PI/180.0));
+
+    Serial.print(separator);
+    Serial.print(obj_pos_x, decimals);
+    Serial.print(separator);
+    Serial.print(obj_pos_y, decimals);
   }
   Serial.print('\n');
-  
 }
 
 
-void SetSpeed(int newSpeed){
-  if(newSpeed > 255)
+void set_speed(int newSpeed) {
+  if (newSpeed > 255)
     newSpeed = 255;
-  else if(newSpeed < -255)
+  else if (newSpeed < -255)
     newSpeed = -255;
-      
+
   moveSpeed = newSpeed;
-  Encoder_1.setMotorPwm(-moveSpeed); 
+  Encoder_1.setMotorPwm(-moveSpeed);
   Encoder_2.setMotorPwm(moveSpeed);
 
- // Serial.print("\tNEW SPEED: ");
- // Serial.println(moveSpeed);
 }
 
-void StopBot(void) {
-  SetSpeed(0);
+void stop_bot(void) {
+  set_speed(0);
 }
 
 
@@ -359,7 +340,7 @@ void rotate_right(void) {
 void handleSerialInput(char* inputStr) {
   const int len = strlen(inputStr);
 
-  if(inputStr[0] == 'P' && inputStr[1] == 'O' && inputStr[2] == 'S'){
+  if (inputStr[0] == 'P' && inputStr[1] == 'O' && inputStr[2] == 'S') {
     print_position();
   }
 
@@ -372,7 +353,7 @@ void handleSerialInput(char* inputStr) {
     if (!strcmp(lidar_msg, "DET")) {  //Colission detected by lidar
       state_colission = c_stop;
 
-      ChangeMowerState(Colission);
+      change_mower_state(Colission);
 
     } else if (!strcmp(lidar_msg, MSG_FROM_LIDAR_RIGHT) || !strcmp(lidar_msg, MSG_FROM_LIDAR_LEFT)) {  //Lidar requests rotation by some degrees
       state_colission = c_rotate;
@@ -383,7 +364,7 @@ void handleSerialInput(char* inputStr) {
       sscanf(ch_angle, "%d", &colission_rotate_deg);
       colission_rotate_dir = lidar_msg[0];
 
-      if(colission_rotate_dir == 'L')
+      if (colission_rotate_dir == 'L')
         colission_rotate_deg = -colission_rotate_deg;
 
 
@@ -397,7 +378,8 @@ void handleSerialInput(char* inputStr) {
       case 'M':
         {
           if (MODE == Auto) {
-            SetSpeed(SPEED_MANUAL);
+            set_speed(0);
+            state_manual = Stopped;
             MODE = Manual;
           }
           break;
@@ -408,7 +390,7 @@ void handleSerialInput(char* inputStr) {
             deg = -200;
             start_deg = -200;
             to_deg = -200;
-            ChangeMowerState(Locate_Path);
+            change_mower_state(Locate_Path);
             MODE = Auto;
           }
           break;
@@ -423,45 +405,45 @@ void handleSerialInput(char* inputStr) {
       case 'W':
         {
           state_manual = Forwards;
-          SetSpeed(SPEED_HIGH);
+          set_speed(SPEED_HIGH);
           break;
         }
       case 'A':
         {
           state_manual = Left;
-          StopBot();
+          stop_bot();
           rotate_left();
           break;
         }
       case 'S':
         {
           state_manual = Backwards;
-          SetSpeed(-SPEED_HIGH);
+          set_speed(-SPEED_HIGH);
           break;
         }
       case 'D':
         {
           state_manual = Right;
-          StopBot();
+          stop_bot();
           rotate_right();
           break;
         }
       case 'Q':
         {
           state_manual = Stopped;
-          StopBot();
+          stop_bot();
           break;
         }
     }
   }
 }
 
-void ChangeMowerState(int new_state) {
+void change_mower_state(int new_state) {
 
   switch (new_state) {
     default:
       {
-        ChangeMowerState(Idle);
+        change_mower_state(Idle);
         break;
       }
     case Idle:
@@ -472,47 +454,45 @@ void ChangeMowerState(int new_state) {
       }
     case Locate_Path:
       {
-        if(WALL_DETECTION_ACTIVE){
-          StopBot();
+        if (WALL_DETECTION_ACTIVE) {
+          stop_bot();
           state_auto = new_state;
           start_deg = deg;
           //SetLedRing(LED_BRIGHTNESS, 0, 0);
 
-        }
-        else{
-          ChangeMowerState(Forward_Fast);
+        } else {
+          change_mower_state(Forward_Fast);
         }
         break;
       }
     case Away_From_Line:
-    {
-      if(LINE_DETECTION_ACTIVE){
-        StopBot();
-        state_auto = new_state;
-        gyro.begin();
-      }
-        else{
-          ChangeMowerState(Locate_Path);
+      {
+        if (LINE_DETECTION_ACTIVE) {
+          stop_bot();
+          state_auto = new_state;
+          gyro.begin();
+        } else {
+          change_mower_state(Locate_Path);
         }
-      break;
-    }
+        break;
+      }
     case Forward_Fast:
       {
         state_auto = new_state;
-        SetSpeed(SPEED_HIGH);
+        set_speed(SPEED_HIGH);
         break;
       }
     case Forward_Approach:
       {
         state_auto = new_state;
-        SetSpeed(SPEED_MEDIUM);
+        set_speed(SPEED_MEDIUM);
         //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS, 0);
         break;
       }
     case Colission:
       {
         state_auto = new_state;
-        StopBot();
+        stop_bot();
         backing_stop_time = 0;
         //SetLedRing(LED_BRIGHTNESS, LED_BRIGHTNESS / 2, 0);
         break;
@@ -520,7 +500,7 @@ void ChangeMowerState(int new_state) {
     case Back:
       {
         state_auto = new_state;
-        SetSpeed(SPEED_MEDIUM);
+        set_speed(SPEED_MEDIUM);
         //SetLedRing(LED_BRIGHTNESS, 0, LED_BRIGHTNESS);
         break;
       }
@@ -532,8 +512,8 @@ void setup() {
   attachInterrupt(Encoder_2.getIntNum(), isr_process_encoder2, RISING);
   gyro.begin();
   position_gyro.begin();
-  Serial.begin(9600);
-  delay(2000);
+  Serial.begin(115200);
+  //delay(2000);
 
   //Set PWM 8KHz
   TCCR1A = _BV(WGM10);
@@ -549,20 +529,24 @@ void setup() {
 #endif
 }
 
-int prev_state = 0;
+int has_booted = 0;
 
 void loop() {
-  
-  position_gyro.update();
+
   update_position();
   distance_cm = ultraSensor.distanceCm();
-  
+  int8_t start_area_detected = 0;
+
+  if (!WALL_DETECTION_ACTIVE) {
+    start_area_detected = (distance_cm <= DISTANCE_MEDIUM);
+  }
+
   unsigned long currentTime = millis();
 
   int i = 0;
   char str_serial[32];
 
-  if(Serial.available()){
+  if (Serial.available()) {
     delay(SERIAL_DELAY_MS);
     while (Serial.available()) {
       char c = Serial.read();
@@ -573,33 +557,23 @@ void loop() {
     }
     Serial.flush();
   }
-  
-
-  if(DEBUG){
-    if(prev_state != state_auto)
-    {
-      Serial.print("State: ");
-      Serial.println(state_auto);
-      if(state_auto == Away_From_Line){
-        Serial.print("L: ");
-        Serial.print(line_sensor_l);
-        Serial.print("\tR: ");
-        Serial.println(line_sensor_r);
-      }
-
-    }
-  }
-  prev_state = state_auto; 
 
   if (i > 0) {
     str_serial[i] = '\0';
     handleSerialInput(str_serial);
   }
 
+  if(!has_booted){
+    Serial.println(BOOT_MSG);
+    has_booted = 1;
+  }
+
+
+
   switch (MODE) {
     case Manual:
       {
-        SetLedRing(0, 0, LED_BRIGHTNESS);
+        set_led_ring(0, 0, LED_BRIGHTNESS);
         switch (state_manual) {
           case Stopped:
             {
@@ -643,22 +617,21 @@ void loop() {
     case Auto:
       {
 
-        SetLedRing(0, LED_BRIGHTNESS, 0);
-        if(WALL_DETECTION_ACTIVE){
+        set_led_ring(0, LED_BRIGHTNESS, 0);
+        if (WALL_DETECTION_ACTIVE) {
           distance_cm = ultraSensor.distanceCm();
         }
 
-        if(LINE_IS_BLACK){
+        if (LINE_IS_BLACK) {
           line_sensor_r = !lineFinder.readSensor2();
           line_sensor_l = !lineFinder.readSensor1();
-        } 
-        else{
+        } else {
           line_sensor_r = lineFinder.readSensor2();
           line_sensor_l = lineFinder.readSensor1();
         }
 
         int line_sensor_detect = line_sensor_r + line_sensor_l;
-        deg = GetZAngle();
+        deg = get_z_angle();
 
 
 
@@ -668,10 +641,10 @@ void loop() {
             }
           case Idle:
             {
-              if(WALL_DETECTION_ACTIVE){
-                ChangeMowerState(Locate_Path);
-              } else{
-                ChangeMowerState(Forward_Fast);
+              if (WALL_DETECTION_ACTIVE) {
+                change_mower_state(Locate_Path);
+              } else {
+                change_mower_state(Forward_Fast);
               }
               break;
             }
@@ -683,194 +656,189 @@ void loop() {
 
               } else if ((distance_cm <= DISTANCE_MEDIUM) || (distance_cm >= 400.0)) {
 
-                StopBot();
+                stop_bot();
                 gyro.begin();
-                start_deg = GetZAngle();
+                start_deg = get_z_angle();
                 to_deg = (start_deg + ROTATE_AVOIDANCE_DEG) % 360;
 
               } else {
-                StopBot();
+                stop_bot();
                 start_deg = -200;
                 to_deg = -200;
-                ChangeMowerState(Forward_Fast);
+                change_mower_state(Forward_Fast);
               }
 
               break;
             }
           case Away_From_Line:
-          {
-            if(line_sensor_detect >= 1){
-              
-              if(backing_stop_time == 0){
-                timer.start();
-                backing_stop_time = timer.read() + BACK_WHEN_LINE_DETECED_MS;
-                SetSpeed(-SPEED_HIGH);
+            {
+              if (line_sensor_detect >= 1) {
+
+                if (backing_stop_time == 0) {
+                  timer.start();
+                  backing_stop_time = timer.read() + BACK_WHEN_LINE_DETECED_MS;
+                  set_speed(-SPEED_HIGH);
+                }
+
+                if (line_sensor_l && !line_sensor_r) {
+                  line_direction = 'R';
+                } else if (!line_sensor_l && line_sensor_r) {
+                  line_direction = 'L';
+                } else if (line_sensor_l && line_sensor_r) {
+                  line_direction = '?';
+                }
+
               }
-              
-              if(line_sensor_l && !line_sensor_r){
-                line_direction = 'R';
-              }
-              else if(!line_sensor_l && line_sensor_r){
-                line_direction = 'L';
-              }
-              else if(line_sensor_l && line_sensor_r){
-                line_direction = '?';
-              }
-           
-            } 
-            
-            else if((timer.read() >= backing_stop_time) && line_sensor_detect == 0){
+
+              else if ((timer.read() >= backing_stop_time) && line_sensor_detect == 0) {
                 backing_stop_time = 0;
-                if(timer.state() == 1){
+                if (timer.state() == 1) {
                   timer.stop();
-                  StopBot();
+                  stop_bot();
                 }
-                if(start_deg == -200){
-                  
-                  start_deg = GetZAngle();
-                  to_deg = start_deg + ROTATE_LINE_DEG;
+                if (start_deg == -200) {
 
-                  if(line_direction == 'L'){
-                    to_deg = abs(start_deg - ROTATE_LINE_DEG);
+                  start_deg = get_z_angle();
+                  int rotate_deg = rotate_line_deg();
+
+                  to_deg = start_deg + rotate_deg;
+
+                  if (line_direction == 'L') {
+                    to_deg = abs(start_deg - rotate_deg);
                   }
-                  
-                }
-                else if (line_direction == 'R' || line_direction == '?'){
-                  if(abs(deg) < to_deg){
+
+                } else if (line_direction == 'R' || line_direction == '?') {
+                  if (abs(deg) < to_deg) {
                     rotate_right();
+                  } else {
+                    change_mower_state(Locate_Path);
                   }
-                  else{
-                    ChangeMowerState(Locate_Path);
-                  }
-                }
-                else if (line_direction == 'L'){
-                  if(abs(deg) < to_deg){
+                } else if (line_direction == 'L') {
+                  if (abs(deg) < to_deg) {
                     rotate_left();
-                  }
-                  else{
-                    ChangeMowerState(Locate_Path);
+                  } else {
+                    change_mower_state(Locate_Path);
                   }
                 }
-            }
+              }
 
-            break;
-          }
+              break;
+            }
+          case Reset_Pos:
+            {
+
+            }
           case Forward_Fast:
             {
-              if ((line_sensor_detect) && (distance_cm < DISTANCE_MEDIUM) && !WALL_DETECTION_ACTIVE)
-              {
-                SetSpeed(0);
-                float angle = ((float)M_PI/180.0)*position_angle;
-                position_x = cos(angle)*LENGTH_TO_ROTATION_AXIS;
-                position_y = sin(angle)*LENGTH_TO_ROTATION_AXIS;
-                ChangeMowerState(Away_From_Line);
+              if ((line_sensor_detect) && (distance_cm < DISTANCE_MEDIUM) && !WALL_DETECTION_ACTIVE) {
+                set_speed(0);
+                change_mower_state(Away_From_Line);
+              } else if (line_sensor_detect) {
+                change_mower_state(Away_From_Line);
               }
-              else if(line_sensor_detect){
-                ChangeMowerState(Away_From_Line);
-              }
-              
+
               else if (distance_cm < DISTANCE_LONG && WALL_DETECTION_ACTIVE) {
-                ChangeMowerState(Forward_Approach);
-              } 
+                change_mower_state(Forward_Approach);
+              }
               break;
             }
 
           case Forward_Approach:
             {
-              if(line_sensor_detect){
-                ChangeMowerState(Away_From_Line);
-              }
-              else if (distance_cm >= DISTANCE_LONG) {
+              if (line_sensor_detect) {
+                change_mower_state(Away_From_Line);
+              } else if (distance_cm >= DISTANCE_LONG) {
 
-                ChangeMowerState(Forward_Fast);
+                change_mower_state(Forward_Fast);
 
               } else if (distance_cm > DISTANCE_MEDIUM) {
-                SetSpeed(SPEED_MEDIUM);
+                set_speed(SPEED_MEDIUM);
               } else if (distance_cm > DISTANCE_SHORT) {
-                SetSpeed(SPEED_SLOW);
-              } else if (distance_cm <= DISTANCE_COLISSION || (distance_cm >= 400.0)) {
-                ChangeMowerState(Back);
+                set_speed(SPEED_SLOW);
+              } else if (distance_cm <= DISTANCE_WALL_COLISSION || (distance_cm >= 400.0)) {
+                change_mower_state(Back);
               }
               break;
             }
 
           case Colission:
             {
-              switch (state_colission)
-              {
+              switch (state_colission) {
                 case c_idle:
-                {
-                  StopBot();
-                  break;
-                }
+                  {
+                    stop_bot();
+                    break;
+                  }
                 case c_stop:
-                {
-                  StopBot();
-                  Serial.print(MSG_TO_LIDAR_STOP);
-                  state_colission = c_idle;
-                  break;
-                }
+                  {
+                    stop_bot();
+                    Serial.print(MSG_TO_LIDAR_STOP);
+                    state_colission = c_idle;
+                    break;
+                  }
                 case c_rotate:
-                {
-                  if (start_deg == -200) { 
+                  {
+                    if (start_deg == -200) {
                       gyro.begin();
-                      start_deg = GetZAngle();
+                      start_deg = get_z_angle();
                       deg = start_deg;
-                      if(colission_rotate_deg > 170){
+                      if (colission_rotate_deg > 170) {
                         colission_rotate_deg = 170;
                       }
-                      if(colission_rotate_deg < -170){
+                      if (colission_rotate_deg < -170) {
                         colission_rotate_deg = -170;
                       }
 
                       to_deg = start_deg + colission_rotate_deg;
 
-                  } else if (colission_rotate_dir == 'R' && deg < to_deg){
-                    
-                    rotate_right();
-                  } else if (colission_rotate_dir == 'L' && deg > to_deg){
-                    rotate_left();
-                  } else{
-                    StopBot();
-                    char msg_to_lidar_pos[32];
-                    print_position('A');
-                    start_deg = -200;
-                    to_deg = -200;
-                    state_colission = c_idle;
+                    } else if (colission_rotate_dir == 'R' && deg < to_deg) {
+
+                      rotate_right();
+                    } else if (colission_rotate_dir == 'L' && deg > to_deg) {
+                      rotate_left();
+                    } else {
+                      stop_bot();
+                      char msg_to_lidar_pos[32];
+                      print_position('A');
+                      start_deg = -200;
+                      to_deg = -200;
+                      state_colission = c_idle;
+                    }
+                    break;
                   }
-                  break;
-                }
                 case c_resume:
-                {                  
-                  if (start_deg == -200) { 
+                  {
+                    if (start_deg == -200) {
                       gyro.begin();
-                      start_deg = GetZAngle();
+                      start_deg = get_z_angle();
                       deg = start_deg;
-                      to_deg = start_deg + ROTATE_LINE_DEG;
-                  } 
-                  if(deg < to_deg){
-                    rotate_right();
-                  } else{
-                    ChangeMowerState(Locate_Path);
-                    state_colission = c_idle;
-                    Serial.print(MSG_TO_LIDAR_OK);
+                      to_deg = start_deg + rotate_line_deg();
+                    }
+                    if (deg < to_deg) {
+                      rotate_right();
+                    } else {
+                      change_mower_state(Locate_Path);
+                      state_colission = c_idle;
+                      start_deg = -200;
+                      to_deg = -200;
+                      Serial.print(MSG_TO_LIDAR_OK);
+                    }
+                    break;
                   }
-                  break;
-                }
                 default:
-                {
-                  break;
-                }
+                  {
+                    break;
+                  }
               }
-              
+
               break;
             }
           case Back:
             {
               if (distance_cm >= DISTANCE_SHORT) {
-                ChangeMowerState(Locate_Path);
+                change_mower_state(Locate_Path);
               }
-              SetSpeed(-SPEED_HIGH);
+              set_speed(-SPEED_HIGH);
               break;
             }
         }
