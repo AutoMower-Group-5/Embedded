@@ -20,34 +20,34 @@ def run_bt_com():
 
     bluetooth.advertise_service(server_socket, "AutoMower", service_id=uuid, service_classes=[uuid, bluetooth.SERIAL_PORT_CLASS], profiles=[bluetooth.SERIAL_PORT_PROFILE])
 
-    print(f"Waiting for connection on RFCOMM channel {port}")
+    while True:
+        print(f"Waiting for connection on RFCOMM channel {port}")
+        client_socket, client_info = server_socket.accept()
+        print(f"Accepted connection from {client_info}")
 
-    client_socket, client_info = server_socket.accept()
-    print(f"Accepted connection from {client_info}")
+        ser = serial.Serial(arduino_port, baud_rate)
+        time.sleep(2)
 
-    ser = serial.Serial(arduino_port, baud_rate)
-    time.sleep(2)
+        try:
+            while True:
+                data_received = client_socket.recv(1024)
+                if len(data_received) == 0:
+                    break
+                
+                data_received = data_received.decode().strip()    
+                ser.write(data_received.encode())
+                
+                if data_received == "M:M":
+                    data = "M:M"
+                if data_received == "M:A":
+                    data = "M:A"
+                
+                #print(data_received)
 
-    try:
-        while True:
-            data_received = client_socket.recv(1024)
-            if len(data_received) == 0:
-                break
-            
-            data_received = data_received.decode().strip()    
-            ser.write(data_received.encode())
-            
-            if data_received == "M:M":
-                data = "M:M"
-            if data_received == "M:A":
-                data = "M:A"
-            
-            #print(data_received)
+        except IOError:
+            pass
 
-    except IOError:
-        pass
+        print("Disconnected")
+        client_socket.close()
 
-    print("Disconnected")
-
-    client_socket.close()
     server_socket.close()
