@@ -21,8 +21,9 @@ def lidar_scan_data(stop_flag, scan_queue):
     print("Scanning data...")
     try:
         for scan_data in lidar.iter_scans():
+            #print(scan_data)
             scan_queue.put(scan_data)
- 
+
             # Check if the stop flag is set
             if stop_flag.is_set():
                 break
@@ -37,7 +38,7 @@ def process_scan_data(stop_flag, scan_queue, stop_pos, resume_pos):
     while not stop_flag.is_set():
         try:
             scan_data = scan_queue.get(block=True)
-            lidar_min_dist = 200  # Min distance for the lidar to detect an object in mm
+            lidar_min_dist = 250  # Min distance for the lidar to detect an object in mm
             # Process the scan data here
             for point in scan_data:
                 quality = int(point[0])
@@ -54,10 +55,6 @@ def process_scan_data(stop_flag, scan_queue, stop_pos, resume_pos):
         except queue.Empty:
             pass
 
-# TODO: Change angle sent to the arduino
-# TODO: If received angle from arduino starts with 0, remove it
-# TODO: Send position to the backend
-# TODO: Clean up the code and bugs
 def write_to_arduino(angle, scan_queue, stop_pos, resume_pos): 
     global LIDAR_MIN_ANGLE
     global LIDAR_MAX_ANGLE
@@ -72,6 +69,7 @@ def write_to_arduino(angle, scan_queue, stop_pos, resume_pos):
                     
 def run_bt_com():
     bt_script.run_bt_com()
+    time.sleep(0.1)
     
 def write_pos(stop_pos, resume_pos):
     global LIDAR_MIN_ANGLE
@@ -79,20 +77,19 @@ def write_pos(stop_pos, resume_pos):
     global data_send
     global data_angle
     
-    #time.sleep(5)
-    
     while True:
         data_received = ser.readline().decode().strip('\n')
         print(data_received)
         if data_received == "BOOTED":
+            ser.write("B\n".encode())
+            time.sleep(1)
             break
-
+    
     while True:   
         ser.write(data_send.encode())
         print("Sending:", data_send)
         
         #ser.reset_input_buffer()
-        
         data_received = ser.readline().decode().strip('\n')
         print("Receiving 1:", data_received)
         
@@ -124,7 +121,6 @@ def write_pos(stop_pos, resume_pos):
                         print("OK")
                     else:
                         print("Error:", response.json())
-                        print("ERROR")
                     
                     data_send = "L:DON\n"
                 
@@ -141,11 +137,6 @@ def write_pos(stop_pos, resume_pos):
                 with scan_queue.mutex:
                     scan_queue.queue.clear()
 
-                #print("Sending:", data_send)
-                
-                #ser.reset_input_buffer()
-            
-            #####################################################
         if ":".join(data_received.split(":")[:2]) == "P:POS":
             x_pos = data_received.split(":")[2]
             y_pos = data_received.split(":")[3]
@@ -153,27 +144,27 @@ def write_pos(stop_pos, resume_pos):
             
             print("Pos:", x_pos, y_pos, z_pos)
             
-            url = "https://intense-stream-40056.herokuapp.com/path/save"
-            pos_data = {"xPath": x_pos, "yPath": y_pos}
+            url = "https://intense-stream-40056.herokuapp.com/path/post/withsession"
+            pos_data = {"xPath": x_pos, "yPath": y_pos, "angle": z_pos}
             response = requests.post(url, json=pos_data)
             
             if response == 200:
                 print("OK")
             else:
                 print("Error:", response.json())
-                print("ERROR")
                     
             time.sleep(0.5)
 
             
 if __name__ == "__main__":
-    serial_port = "/dev/ttyUSB1" # Serial port for the arduino
+    serial_port = "/dev/ttyUSB0" # Serial port for the arduino
     serial_baud_rate = 115200  # Baud rate for the arduino
     ser = serial.Serial(serial_port, serial_baud_rate) # Init serial
-    
-    lidar_port = "/dev/ttyUSB0"  # Replace with the correct port for your RPLidar
+    lidar_port = "/dev/ttyUSB1"  # Replace with the correct port for your RPLidar
     lidar = RPLidar(lidar_port)
- 
+    
+    lidar.reset()
+    
     stop_flag = threading.Event()
     stop_pos = threading.Event()
     resume_pos = threading.Event()

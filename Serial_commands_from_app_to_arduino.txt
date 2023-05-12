@@ -1,0 +1,15 @@
+Från appen: 
+	Modes 
+
+	Manuell: 	"M:M"
+	Auto:		"M:A"
+
+
+
+	Direction
+
+	Froward: 	"D:W"
+	Backward: 	"D:S"
+	Left:		"D:A"
+	Right: 		"D:D"		
+	Stop:		"D:Q"
