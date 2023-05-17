@@ -1,5 +1,6 @@
 from rplidar import RPLidar
 import time
+#time.sleep(10)
 import threading
 import serial
 import queue
@@ -7,12 +8,10 @@ import importlib
 import requests
 import pi_camera
 
-#time.sleep(10)
-
 bt_script = importlib.import_module("bt_com")
 
-LIDAR_MIN_ANGLE = 170
-LIDAR_MAX_ANGLE = 190
+LIDAR_MIN_ANGLE = 160
+LIDAR_MAX_ANGLE = 200
 bt_msg = "M:A"
 data_send = "POS\n"
 data_angle = 0
@@ -48,7 +47,7 @@ def process_scan_data(stop_flag, scan_queue, stop_pos, resume_pos):
                 #print(quality, angle, distance)
                 if (quality > 13 and
                     LIDAR_MIN_ANGLE <= angle <= LIDAR_MAX_ANGLE
-                    and distance < lidar_min_dist and bt_msg == "M:A"):
+                    and distance < lidar_min_dist and bt_msg == "M:A" and data_send == "POS\n"):
                     write_to_arduino(angle, scan_queue, stop_pos, resume_pos)
                     break
             
@@ -62,7 +61,16 @@ def write_to_arduino(angle, scan_queue, stop_pos, resume_pos):
     global data_angle
     
     # Object detected, sending stop command to the arduino
-    data_send = "L:DET\n"
+    if (data_send != "L:DET\n"):
+        data_send = "L:DET\n"
+        
+        ser.write(data_send.encode())
+        print("Sending:", data_send)
+        
+        #ser.reset_input_buffer()
+        #data_received = ser.readline().decode().strip('\n')
+        #print("Receiving 1:", data_received)
+    
     data_angle = angle
     data_scan_queue = scan_queue
     
@@ -85,10 +93,12 @@ def write_pos(stop_pos, resume_pos):
             time.sleep(1)
             break
     
-    while True:   
-        ser.write(data_send.encode())
-        print("Sending:", data_send)
-        
+    while True:
+         
+        if data_send != "L:DET\n":
+            ser.write(data_send.encode())
+            print("Sending:", data_send)
+            
         #ser.reset_input_buffer()
         data_received = ser.readline().decode().strip('\n')
         print("Receiving 1:", data_received)
@@ -98,12 +108,12 @@ def write_pos(stop_pos, resume_pos):
                 new_angle = str(abs(data_angle - 180)).zfill(3)
                 
                 # Send coords
-                if data_angle < LIDAR_MAX_ANGLE:
-                    time.sleep(1)
+                if data_angle > 180:
+                    #time.sleep(1)
                     data_send = f"L:RHT:{new_angle}\n"
                     angle = 0
-                elif data_angle > LIDAR_MIN_ANGLE:
-                    time.sleep(1)
+                elif data_angle < 180:
+                    #time.sleep(1)
                     data_send = f"L:LFT:{new_angle}\n"
                     angle = 0
                 
@@ -111,9 +121,11 @@ def write_pos(stop_pos, resume_pos):
                 if ":".join(data_received.split(":")[:2]) == "A:POS":
                     x_pos = data_received.split(":")[2]
                     y_pos = data_received.split(":")[3]
-                    url = "https://intense-stream-40056.herokuapp.com/collision/post"
-                    pos_data = {"xCoordinate": x_pos, "yCoordinate": y_pos}
                     
+
+                    url = "https://intense-stream-40056.herokuapp.com/collision/session/post"
+                    pos_data = {"xCoordinate": x_pos, "yCoordinate": y_pos}
+            
                     response = requests.post(url, json=pos_data)
                     pi_camera.send_picture()
                     
@@ -144,8 +156,8 @@ def write_pos(stop_pos, resume_pos):
             
             print("Pos:", x_pos, y_pos, z_pos)
             
-            url = "https://intense-stream-40056.herokuapp.com/path/post/withsession"
-            pos_data = {"xPath": x_pos, "yPath": y_pos, "angle": z_pos}
+            url = "https://intense-stream-40056.herokuapp.com/path/session/post"
+            pos_data = {"xCoordinate": x_pos, "yCoordinate": y_pos, "angle": z_pos}
             response = requests.post(url, json=pos_data)
             
             if response == 200:
@@ -157,10 +169,10 @@ def write_pos(stop_pos, resume_pos):
 
             
 if __name__ == "__main__":
-    serial_port = "/dev/ttyUSB0" # Serial port for the arduino
+    serial_port = "/dev/ttyUSB1" # Serial port for the arduino
     serial_baud_rate = 115200  # Baud rate for the arduino
     ser = serial.Serial(serial_port, serial_baud_rate) # Init serial
-    lidar_port = "/dev/ttyUSB1"  # Replace with the correct port for your RPLidar
+    lidar_port = "/dev/ttyUSB0"  # Replace with the correct port for your RPLidar
     lidar = RPLidar(lidar_port)
     
     lidar.reset()

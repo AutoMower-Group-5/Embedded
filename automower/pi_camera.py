@@ -33,7 +33,7 @@ def send_picture():
     # print to check encoded image
     # print(encoded_string)
  
-    url = "https://intense-stream-40056.herokuapp.com/image/writeWithSession"
+    url = "https://intense-stream-40056.herokuapp.com/image/session/post"
     data = {'encodedImg': encoded_string}
     
     # Send a POST request with the URL and data
