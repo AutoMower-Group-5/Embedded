@@ -206,7 +206,8 @@ void lidar_pos_msg(char* res, int x, int y) {
 
 
 
-
+char next_rotation = 'R';
+char rotate_dir = next_rotation;
 
 
 int colission_rotate_deg = 0;
@@ -365,6 +366,7 @@ void handleSerialInput(char* inputStr) {
     state_colission = c_idle;
 
     if (!strcmp(lidar_msg, "DET")) {  //Colission detected by lidar
+      start_deg = -200.0;
       state_colission = c_stop;
 
       change_mower_state(Colission);
@@ -453,6 +455,8 @@ void handleSerialInput(char* inputStr) {
 }
 
 void change_mower_state(int new_state) {
+
+  start_deg = -200;
 
   switch (new_state) {
     default:
@@ -842,14 +846,29 @@ void loop() {
                   }
                 case c_resume:
                   {
-                    if (start_deg == -200) {
+                    if(line_sensor_detect){
+                      Serial.print(MSG_TO_LIDAR_OK);
+                      change_mower_state(Away_From_Line);
+                    }
+                    else if (start_deg == -200) {
                       gyro.begin();
                       start_deg = get_z_angle();
                       deg = start_deg;
-                      to_deg = start_deg + rotate_line_deg();
+                      rotate_dir = next_rotation;
+                      if(rotate_dir == 'R'){
+                        to_deg = start_deg + rotate_line_deg();
+                        next_rotation = 'L';
+                      }
+                      else if (rotate_dir == 'L'){
+                        to_deg = start_deg - rotate_line_deg();
+                        next_rotation = 'R';
+                      }
+
                     }
-                    if (deg < to_deg) {
+                    else if ((rotate_dir == 'R') && (deg < to_deg)) {
                       rotate_right();
+                    } else if ((rotate_dir == 'L') && (deg > to_deg)){
+                      rotate_left();
                     } else {
                       change_mower_state(Locate_Path);
                       state_colission = c_idle;
