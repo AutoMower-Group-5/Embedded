@@ -5,16 +5,16 @@
 #include "Timer.h"
 
 Timer timer;
-Timer postition_timer;
+Timer rotation_timer;
 
-MeGyro gyro(0, 0x69);
+//MeGyro gyro(0, 0x69);
 MeGyro position_gyro(0, 0x69);
 
 unsigned char table[128] = { 0 };
 SoftwareSerial softuart(13, 12);
 MeSerial mySerial(PORT_8);
 
-MeUltrasonicSensor ultraSensor(PORT_7); /* Ultrasonic module can ONLY be connected to port 3, 4, 6, 7, 8 of base shield. */
+//MeUltrasonicSensor ultraSensor(PORT_7); /* Ultrasonic module can ONLY be connected to port 3, 4, 6, 7, 8 of base shield. */
 MeLineFollower lineFinder(PORT_9);
 
 MeEncoderOnBoard Encoder_1(SLOT1);
@@ -106,7 +106,7 @@ const float LIDAR_MOUNT_OFFSET_TO_OBJ = LIDAR_MOUNT_DIST_TO_MIDDLE + LIDAR_DIST_
 
 const int SPEED_FACTOR = 1 + DEBUG;
 const int16_t SPEED_HIGH = 100 / SPEED_FACTOR;
-const int16_t SPEED_MEDIUM = 75 / SPEED_FACTOR;
+const int16_t SPEED_MEDIUM = 85 / SPEED_FACTOR;
 const int16_t SPEED_SLOW = 50 / SPEED_FACTOR;
 
 const int16_t SPEED_MANUAL = SPEED_MEDIUM;
@@ -127,8 +127,9 @@ const int16_t DISTANCE_WALL_COLISSION = 5;
 
 const int LINE_DETECTION_ACTIVE = 1;
 const int BACK_WHEN_LINE_DETECED_MS = 500;
-const int16_t ROTATE_LINE_DEG_MIN = 79;
-const int16_t ROTATE_LINE_DEG_MAX = 117;
+const int16_t ROTATE_LINE_TIM_MIN = 1*1000;
+const int16_t ROTATE_LINE_TIM_MAX = 2*1000;
+const int16_t ROTATE_OBJECT_TIME = 200;
 
 const int WAIT_FOR_BOOT = 1;
 
@@ -147,15 +148,10 @@ void set_led_ring(int r, int g, int b) {
   led_ring.show();
 }
 
-int get_z_angle() {
-  gyro.fast_update();
-  int deg = (int)gyro.getAngleZ();
-  return deg;
-}
 
-int rotate_line_deg(){
-  int rot_deg = random(ROTATE_LINE_DEG_MIN, ROTATE_LINE_DEG_MAX);
-  return rot_deg;
+int rotate_line_time(){
+  int rot_tim = random(ROTATE_LINE_TIM_MIN, ROTATE_LINE_TIM_MAX);
+  return rot_tim;
 }
 
 char* substring(char* destination, const char* source, int beg, int n) {
@@ -224,6 +220,7 @@ int start_deg = -200;
 int to_deg = -200;
 
 int backing_stop_time = 0;
+int rotate_stop_time = 0;
 
 float position_angle = 0;
 
@@ -244,15 +241,14 @@ void isr_process_encoder1(void) {
     Encoder_1.pulsePosMinus();
   } else {
     Encoder_1.pulsePosPlus();
-    ;
   }
 }
 
 void isr_process_encoder2(void) {
   if (digitalRead(Encoder_2.getPortB()) == 0) {
-    Encoder_2.pulsePosMinus();
-  } else {
     Encoder_2.pulsePosPlus();
+  } else {
+    Encoder_2.pulsePosMinus();
   }
 }
 
@@ -266,6 +262,7 @@ void update_position() {
 
   double delta_distance = (left_distance + right_distance) / 2.0;
   double heading = position_gyro.getAngleZ();       // Get the heading from the gyro
+  
   double delta_heading = heading * (M_PI / 180.0);  // Convert the heading from degrees to radians
 
   x_position += delta_distance * cos(delta_heading) * 10;
@@ -298,7 +295,7 @@ void print_position(char type = 'P') {
     Serial.print(header[header_ix]);
   }
 
-  position_gyro.fast_update();
+  //position_gyro.fast_update();
   float heading_degrees = position_gyro.getAngleZ();
 
   if (type == 'P') {
@@ -312,11 +309,11 @@ void print_position(char type = 'P') {
 
     float obj_pos_x = x_position + LIDAR_MOUNT_OFFSET_TO_OBJ*cos(heading_degrees* (M_PI/180.0));
     float obj_pos_y = y_position + LIDAR_MOUNT_OFFSET_TO_OBJ*sin(heading_degrees* (M_PI/180.0));
-
+    
     Serial.print(separator);
-    Serial.print(obj_pos_x, decimals);
+    Serial.print(x_position, decimals);
     Serial.print(separator);
-    Serial.print(obj_pos_y, decimals);
+    Serial.print(y_position, decimals);
   }
   Serial.print('\n');
 }
@@ -486,7 +483,6 @@ void change_mower_state(int new_state) {
         if (LINE_DETECTION_ACTIVE) {
           stop_bot();
           state_auto = new_state;
-          gyro.begin();
         } else {
           change_mower_state(Locate_Path);
         }
@@ -538,7 +534,6 @@ void setup() {
   // 12 LED Ring controller is on Auriga D44/PWM
   led_ring.setpin(44);
 #endif
-  gyro.begin();
   position_gyro.begin();
   set_led_ring(LED_BRIGHTNESS, 0, 0);
 }
@@ -546,7 +541,8 @@ void setup() {
 void loop() {
 
   update_position();
-  distance_cm = ultraSensor.distanceCm();
+  
+  
   int8_t start_area_detected = 0;
 
   if (!WALL_DETECTION_ACTIVE) {
@@ -657,7 +653,7 @@ void loop() {
 
         set_led_ring(0, LED_BRIGHTNESS, 0);
         if (WALL_DETECTION_ACTIVE) {
-          distance_cm = ultraSensor.distanceCm();
+          //Qdistance_cm = ultraSensor.distanceCm();
         }
 
         if (LINE_IS_BLACK) {
@@ -669,7 +665,6 @@ void loop() {
         }
 
         int line_sensor_detect = line_sensor_r + line_sensor_l;
-        deg = get_z_angle();
 
 
 
@@ -695,8 +690,8 @@ void loop() {
               } else if ((distance_cm <= DISTANCE_MEDIUM) || (distance_cm >= 400.0)) {
 
                 stop_bot();
-                gyro.begin();
-                start_deg = get_z_angle();
+                //gyro.begin();
+                //start_deg = get_z_angle();
                 to_deg = (start_deg + ROTATE_AVOIDANCE_DEG) % 360;
 
               } else {
@@ -712,7 +707,7 @@ void loop() {
             {
               if (line_sensor_detect >= 1) {
 
-                if (backing_stop_time == 0) {
+                if (timer.state() == 0) {
                   timer.start();
                   backing_stop_time = timer.read() + BACK_WHEN_LINE_DETECED_MS;
                   set_speed(-SPEED_HIGH);
@@ -725,36 +720,32 @@ void loop() {
                 } else if (line_sensor_l && line_sensor_r) {
                   line_direction = '?';
                 }
-
               }
 
               else if ((timer.read() >= backing_stop_time) && line_sensor_detect == 0) {
-                backing_stop_time = 0;
                 if (timer.state() == 1) {
                   timer.stop();
-                  stop_bot();
+                  set_speed(0);
                 }
-                if (start_deg == -200) {
+                if (rotation_timer.state() == 0) {
 
-                  start_deg = get_z_angle();
-                  int rotate_deg = rotate_line_deg();
+                  rotation_timer.start();
+                  rotate_stop_time = rotation_timer.read() + rotate_line_time();
+                  Serial.print("TIME: ");
+                  Serial.println(rotate_stop_time);
 
-                  to_deg = start_deg + rotate_deg;
-
-                  if (line_direction == 'L') {
-                    to_deg = abs(start_deg - rotate_deg);
-                  }
-
-                } else if (line_direction == 'R' || line_direction == '?') {
-                  if (abs(deg) < to_deg) {
+                } else if (line_direction == 'R') {
+                  if (rotation_timer.read() < rotate_stop_time) {
                     rotate_right();
                   } else {
+                    rotation_timer.stop();
                     change_mower_state(Locate_Path);
                   }
-                } else if (line_direction == 'L') {
-                  if (abs(deg) < to_deg) {
+                } else if (line_direction == 'L' || line_direction == '?') {
+                  if (rotation_timer.read() < rotate_stop_time) {
                     rotate_left();
                   } else {
+                    rotation_timer.stop();
                     change_mower_state(Locate_Path);
                   }
                 }
@@ -816,30 +807,19 @@ void loop() {
                   }
                 case c_rotate:
                   {
-                    if (start_deg == -200) {
-                      gyro.begin();
-                      start_deg = get_z_angle();
-                      deg = start_deg;
-                      if (colission_rotate_deg > 170) {
-                        colission_rotate_deg = 170;
-                      }
-                      if (colission_rotate_deg < -170) {
-                        colission_rotate_deg = -170;
-                      }
-
-                      to_deg = start_deg + colission_rotate_deg;
-
-                    } else if (colission_rotate_dir == 'R' && deg < to_deg) {
+                    if (rotation_timer.state() == 0) {
+                      rotation_timer.start();
+                      rotate_stop_time = rotation_timer.read() + ROTATE_OBJECT_TIME;
+                    } else if (colission_rotate_dir == 'R' && rotation_timer.read() < rotate_stop_time) {
 
                       rotate_right();
-                    } else if (colission_rotate_dir == 'L' && deg > to_deg) {
+                    } else if (colission_rotate_dir == 'L' && rotation_timer.read() < rotate_stop_time) {
                       rotate_left();
                     } else {
                       stop_bot();
                       char msg_to_lidar_pos[32];
                       print_position('A');
-                      start_deg = -200;
-                      to_deg = -200;
+                      rotation_timer.stop();
                       state_colission = c_idle;
                     }
                     break;
@@ -850,31 +830,26 @@ void loop() {
                       Serial.print(MSG_TO_LIDAR_OK);
                       change_mower_state(Away_From_Line);
                     }
-                    else if (start_deg == -200) {
-                      gyro.begin();
-                      start_deg = get_z_angle();
-                      deg = start_deg;
+                    else if (rotation_timer.state() == 0) {
+                      rotation_timer.start();
+                      rotate_stop_time = rotation_timer.read() + rotate_line_time();
                       rotate_dir = next_rotation;
-                      if(rotate_dir == 'R'){
-                        to_deg = start_deg + rotate_line_deg();
-                        next_rotation = 'L';
-                      }
-                      else if (rotate_dir == 'L'){
-                        to_deg = start_deg - rotate_line_deg();
-                        next_rotation = 'R';
-                      }
-
                     }
-                    else if ((rotate_dir == 'R') && (deg < to_deg)) {
+
+                    else if ((rotate_dir == 'R') && (rotation_timer.read() < rotate_stop_time)) {
+                      
                       rotate_right();
-                    } else if ((rotate_dir == 'L') && (deg > to_deg)){
+                      next_rotation = 'L';
+
+                    } else if ((rotate_dir == 'L') && (rotation_timer.read() < rotate_stop_time)){
                       rotate_left();
+                      next_rotation = 'R';
+
                     } else {
-                      change_mower_state(Locate_Path);
                       state_colission = c_idle;
-                      start_deg = -200;
-                      to_deg = -200;
-                      Serial.print(MSG_TO_LIDAR_OK);
+                      Serial.print(MSG_TO_LIDAR_OK);                    
+                      rotation_timer.stop();
+                      change_mower_state(Locate_Path);
                     }
                     break;
                   }
