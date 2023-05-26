@@ -6,6 +6,7 @@
 
 Timer timer;
 Timer rotation_timer;
+Timer colission_timer;
 
 //MeGyro gyro(0, 0x69);
 MeGyro position_gyro(0, 0x69);
@@ -127,9 +128,9 @@ const int16_t DISTANCE_WALL_COLISSION = 5;
 
 const int LINE_DETECTION_ACTIVE = 1;
 const int BACK_WHEN_LINE_DETECED_MS = 500;
-const int16_t ROTATE_LINE_TIM_MIN = 1*1000;
-const int16_t ROTATE_LINE_TIM_MAX = 2*1000;
-const int16_t ROTATE_OBJECT_TIME = 200;
+const int16_t ROTATE_LINE_TIM_MIN = 1500;
+const int16_t ROTATE_LINE_TIM_MAX = 2200;
+const int16_t ROTATE_OBJECT_MS_PER_DEG = 18;
 
 const int WAIT_FOR_BOOT = 1;
 
@@ -375,10 +376,8 @@ void handleSerialInput(char* inputStr) {
       substring(ch_angle, inputStr, 6, substr_depth);
 
       sscanf(ch_angle, "%d", &colission_rotate_deg);
+      //Serial.println(colission_rotate_deg);
       colission_rotate_dir = lidar_msg[0];
-
-      if (colission_rotate_dir == 'L')
-        colission_rotate_deg = -colission_rotate_deg;
 
 
     } else if (!strcmp(lidar_msg, "DON")) {  //Lidar is done taking photo
@@ -731,8 +730,6 @@ void loop() {
 
                   rotation_timer.start();
                   rotate_stop_time = rotation_timer.read() + rotate_line_time();
-                  Serial.print("TIME: ");
-                  Serial.println(rotate_stop_time);
 
                 } else if (line_direction == 'R') {
                   if (rotation_timer.read() < rotate_stop_time) {
@@ -807,19 +804,21 @@ void loop() {
                   }
                 case c_rotate:
                   {
-                    if (rotation_timer.state() == 0) {
-                      rotation_timer.start();
-                      rotate_stop_time = rotation_timer.read() + ROTATE_OBJECT_TIME;
-                    } else if (colission_rotate_dir == 'R' && rotation_timer.read() < rotate_stop_time) {
+                    if (colission_timer.state() == 0) {
+                      colission_timer.start();
+                      rotate_stop_time = colission_timer.read() + colission_rotate_deg*ROTATE_OBJECT_MS_PER_DEG;
+                      //Serial.print("Rotate time: ");
+                      //Serial.print(rotate_stop_time);
+                    } else if (colission_rotate_dir == 'R' && colission_timer.read() < rotate_stop_time) {
 
                       rotate_right();
-                    } else if (colission_rotate_dir == 'L' && rotation_timer.read() < rotate_stop_time) {
+                    } else if (colission_rotate_dir == 'L' && colission_timer.read() < rotate_stop_time) {
                       rotate_left();
                     } else {
                       stop_bot();
                       char msg_to_lidar_pos[32];
                       print_position('A');
-                      rotation_timer.stop();
+                      colission_timer.stop();
                       state_colission = c_idle;
                     }
                     break;
@@ -830,25 +829,25 @@ void loop() {
                       Serial.print(MSG_TO_LIDAR_OK);
                       change_mower_state(Away_From_Line);
                     }
-                    else if (rotation_timer.state() == 0) {
-                      rotation_timer.start();
-                      rotate_stop_time = rotation_timer.read() + rotate_line_time();
+                    else if (colission_timer.state() == 0) {
+                      colission_timer.start();
+                      rotate_stop_time = colission_timer.read() + rotate_line_time();
                       rotate_dir = next_rotation;
                     }
 
-                    else if ((rotate_dir == 'R') && (rotation_timer.read() < rotate_stop_time)) {
+                    else if ((rotate_dir == 'R') && (colission_timer.read() < rotate_stop_time)) {
                       
                       rotate_right();
                       next_rotation = 'L';
 
-                    } else if ((rotate_dir == 'L') && (rotation_timer.read() < rotate_stop_time)){
+                    } else if ((rotate_dir == 'L') && (colission_timer.read() < rotate_stop_time)){
                       rotate_left();
                       next_rotation = 'R';
 
                     } else {
                       state_colission = c_idle;
                       Serial.print(MSG_TO_LIDAR_OK);                    
-                      rotation_timer.stop();
+                      colission_timer.stop();
                       change_mower_state(Locate_Path);
                     }
                     break;
